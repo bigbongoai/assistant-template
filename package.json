@@ -1,0 +1,13 @@
+{
+  "name": "claude-assistant-template",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal-assistant workspace for Claude Code.",
+  "scripts": {
+    "test": "echo \"No tests — Claude writes and runs helper scripts inside tasks/ on demand.\" && exit 0"
+  },
+  "dependencies": {
+    "playwright": "^1.56.1",
+    "sqlite3": "^5.1.7"
+  }
+}

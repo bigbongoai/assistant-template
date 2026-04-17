@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Claude Code / MCP runtime state
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Claude's throwaway artifacts inside tasks
+tasks/**/temp/
+
+# Env files — never commit secrets
+.env
+.env.*
+!.env.example

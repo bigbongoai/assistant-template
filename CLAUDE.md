@@ -82,3 +82,5 @@ reference material shared across the team. New work always goes in `tasks/`.
 When a site returns 403 or otherwise blocks a plain fetch, collect the URLs into a list and use Playwright to launch a real browser, load them, and extract the content from the rendered page.
 
 <!-- selftest marker -->
+
+<!-- update 2 -->

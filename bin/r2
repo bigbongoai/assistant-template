@@ -35,10 +35,13 @@ command -v aws >/dev/null 2>&1 || die "aws CLI not found — brew install awscli
 
 set -a; . "$ROOT/.env"; set +a
 
-: "${R2_USER_EMAIL:?r2: set R2_USER_EMAIL in .env — it is your folder name}"
-: "${R2_ACCESS_KEY_ID:?r2: missing R2_ACCESS_KEY_ID in .env}"
-: "${R2_SECRET_KEY:?r2: missing R2_SECRET_KEY in .env}"
-: "${R2_ENDPOINT:?r2: missing R2_ENDPOINT in .env}"
+[ -n "${R2_USER_EMAIL:-}" ]   || die "set R2_USER_EMAIL in .env — it becomes your folder name"
+[ -n "${R2_ACCESS_KEY_ID:-}" ] || die "R2_ACCESS_KEY_ID is empty in .env — ask Petar for a token"
+[ -n "${R2_SECRET_KEY:-}" ]    || die "R2_SECRET_KEY is empty in .env — ask Petar for a token"
+[ -n "${R2_ENDPOINT:-}" ]      || die "R2_ENDPOINT is empty in .env"
+case "$R2_ENDPOINT" in
+  *ACCOUNT_ID*) die "R2_ENDPOINT still has the ACCOUNT_ID placeholder — put your real account id in .env" ;;
+esac
 
 BUCKET_PRIVATE="${R2_BUCKET_PRIVATE:-assistant-team}"
 BUCKET_PUBLIC="${R2_BUCKET_PUBLIC:-assistant}"

@@ -1,3 +1,18 @@
+# Your tasks are yours — never pushed to the shared repo.
+# The folder itself is tracked so a fresh clone has somewhere to work.
+tasks/*
+!tasks/.gitkeep
+
+# Personal files. Copy the .example versions via ./setup.sh, then edit freely
+# without your edits ever conflicting on `git pull`.
+_personal.md
+_tasks.md
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
 # Dependencies
 node_modules/
 
@@ -12,11 +27,3 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
-
-# Claude's throwaway artifacts inside tasks
-tasks/**/temp/
-
-# Env files — never commit secrets
-.env
-.env.*
-!.env.example

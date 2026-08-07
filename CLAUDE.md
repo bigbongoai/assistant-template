@@ -56,6 +56,27 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
 - **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.).
 
+## Large files and sharing (R2)
+
+Deliverables live in git, but big binaries and anything meant to be handed to a
+colleague go to Cloudflare R2 via `./bin/r2`. Never call `aws s3` directly —
+the wrapper is what keeps writes inside the user's own folder, and R2 has no
+versioning, so an overwrite or delete cannot be undone.
+
+- `./bin/r2 put <file> [dest]` — private bucket, under the user's own folder
+- `./bin/r2 share <file> [dest]` — **public** bucket; prints a link anyone can open
+- `./bin/r2 ls` / `./bin/r2 rm <path>` — scoped to the user's folder
+
+`share` publishes to the open internet. Use it only for things the user has
+asked to send someone, and say so plainly when you do. Never `share` anything
+containing credentials, infrastructure detail, personal data, or client material.
+
+## Reference examples
+
+`examples/` holds two worked tasks showing the folder conventions end to end.
+Read them when unsure of the layout. Never write new work there — it is
+reference material shared across the team. New work always goes in `tasks/`.
+
 ## Handling blocked sites (403 / anti-scraping)
 
 When a site returns 403 or otherwise blocks a plain fetch, collect the URLs into a list and use Playwright to launch a real browser, load them, and extract the content from the rendered page.

@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+#
+# r2 — email-scoped uploads to Cloudflare R2.
+#
+# Every write lands under your own folder ($R2_USER_EMAIL) in the private
+# bucket, so a mistyped path can only ever hit your own files. This matters
+# because R2 has no object versioning: an overwrite or delete is permanent
+# and immediate, with no trash and no restore.
+#
+# This stops accidents, not people. Anyone holding the token can still run
+# `aws s3` directly against any folder. Accidents are the realistic risk.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+die() { printf 'r2: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+r2 — email-scoped uploads to Cloudflare R2
+
+  r2 put   <file> [dest]   upload to your folder in the private bucket
+  r2 share <file> [dest]   upload to the PUBLIC bucket, print a shareable link
+  r2 ls    [prefix]        list your folder
+  r2 rm    <path>          delete one file inside your folder
+  r2 url   <path>          print the public URL for a shared path
+
+A dest ending in "/" is treated as a folder; otherwise it is the filename.
+EOF
+}
+
+command -v aws >/dev/null 2>&1 || die "aws CLI not found — brew install awscli"
+[ -f "$ROOT/.env" ] || die "no .env — run ./setup.sh, then fill it in"
+
+set -a; . "$ROOT/.env"; set +a
+
+: "${R2_USER_EMAIL:?r2: set R2_USER_EMAIL in .env — it is your folder name}"
+: "${R2_ACCESS_KEY_ID:?r2: missing R2_ACCESS_KEY_ID in .env}"
+: "${R2_SECRET_KEY:?r2: missing R2_SECRET_KEY in .env}"
+: "${R2_ENDPOINT:?r2: missing R2_ENDPOINT in .env}"
+
+BUCKET_PRIVATE="${R2_BUCKET_PRIVATE:-assistant-team}"
+BUCKET_PUBLIC="${R2_BUCKET_PUBLIC:-assistant}"
+PUBLIC_BASE="${R2_PUBLIC_BASE:-https://assistant.bigbongo.ai}"
+
+ME="$R2_USER_EMAIL"
+# Public links use only the local part, to keep full addresses off the open web.
+PUB_NS="share/${ME%%@*}"
+
+export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$R2_SECRET_KEY"
+export AWS_DEFAULT_REGION=auto
+
+s3() { command aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
+
+# Reject anything that could climb out of the prefix.
+# Must be called as a statement in the main shell: a `die` inside $( ) would
+# only exit the subshell and let the caller carry on with an empty string.
+check() {
+  case "${1:-}" in
+    *..*) die "'..' is not allowed in paths" ;;
+  esac
+}
+
+# Build a destination key. Assumes check() has already vetted $3.
+key_for() {
+  local prefix="$1" src="$2" dest="${3:-}"
+  dest="${dest#/}"
+  if [ -z "$dest" ]; then
+    printf '%s/%s' "$prefix" "$(basename "$src")"
+  elif [ "${dest: -1}" = "/" ]; then
+    printf '%s/%s%s' "$prefix" "$dest" "$(basename "$src")"
+  else
+    printf '%s/%s' "$prefix" "$dest"
+  fi
+}
+
+cmd="${1:-help}"; shift || true
+
+case "$cmd" in
+  put)
+    [ $# -ge 1 ] || die "usage: r2 put <file> [dest]"
+    [ -f "$1" ] || die "no such file: $1"
+    check "${2:-}"
+    key="$(key_for "$ME" "$1" "${2:-}")"
+    s3 cp "$1" "s3://$BUCKET_PRIVATE/$key" \
+      || die "upload failed — does bucket '$BUCKET_PRIVATE' exist and is it in your token's scope?"
+    printf '\nprivate  s3://%s/%s\n' "$BUCKET_PRIVATE" "$key"
+    ;;
+
+  share)
+    [ $# -ge 1 ] || die "usage: r2 share <file> [dest]"
+    [ -f "$1" ] || die "no such file: $1"
+    check "${2:-}"
+    key="$(key_for "$PUB_NS" "$1" "${2:-}")"
+    s3 cp "$1" "s3://$BUCKET_PUBLIC/$key" \
+      || die "upload failed — does bucket '$BUCKET_PUBLIC' exist and is it in your token's scope?"
+    printf '\nPUBLIC — anyone with this link can open it:\n  %s/%s\n' "$PUBLIC_BASE" "$key"
+    ;;
+
+  ls)
+    check "${1:-}"
+    p="${1:-}"; p="${p#/}"
+    s3 ls "s3://$BUCKET_PRIVATE/$ME/$p"
+    ;;
+
+  rm)
+    [ $# -ge 1 ] || die "usage: r2 rm <path>   (inside your folder only)"
+    check "$1"
+    p="${1#/}"
+    printf 'delete s3://%s/%s/%s ? [y/N] ' "$BUCKET_PRIVATE" "$ME" "$p"
+    read -r ok
+    [ "$ok" = "y" ] || die "aborted"
+    s3 rm "s3://$BUCKET_PRIVATE/$ME/$p"
+    ;;
+
+  url)
+    [ $# -ge 1 ] || die "usage: r2 url <path>"
+    check "$1"
+    p="${1#/}"
+    printf '%s/%s/%s\n' "$PUBLIC_BASE" "$PUB_NS" "$p"
+    ;;
+
+  help|--help|-h)
+    usage
+    printf '\nyou are: %s\n  private: s3://%s/%s/\n  public:  %s/%s/\n' \
+      "$ME" "$BUCKET_PRIVATE" "$ME" "$PUBLIC_BASE" "$PUB_NS"
+    ;;
+
+  *) die "unknown command '$cmd' — try: r2 help" ;;
+esac

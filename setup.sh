@@ -28,6 +28,12 @@ else
   printf '  + %-10s added → %s\n' "upstream" "$UPSTREAM_URL"
 fi
 
+# Your history and the template's diverge by design — you commit tasks, the
+# template doesn't. Without this, `git pull upstream main` aborts asking how to
+# reconcile. Merge (not rebase) keeps your task commits untouched.
+git config pull.rebase false
+printf '  = %-10s merge on pull (keeps your commits intact)\n' "git config"
+
 cat <<'EOF'
 
 Next:

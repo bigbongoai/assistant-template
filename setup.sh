@@ -1,34 +1,42 @@
 #!/usr/bin/env bash
 #
-# One-time setup after cloning. Safe to re-run — it never overwrites your files.
+# One-time setup after cloning your own assistant repo.
+# Safe to re-run — it never overwrites anything you've filled in.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-copy_if_missing() {
-  if [ -e "$2" ]; then
-    printf '  = %-18s already exists, left alone\n' "$2"
-  else
-    cp "$1" "$2"
-    printf '  + %-18s created from %s\n' "$2" "$1"
-  fi
-}
+UPSTREAM_URL="git@github.com:bigbongoai/assistant-template.git"
 
 echo "Setting up your assistant workspace:"
-copy_if_missing _personal.md.example _personal.md
-copy_if_missing _tasks.md.example    _tasks.md
-copy_if_missing .env.example         .env
+
+if [ -e .env ]; then
+  printf '  = %-10s already exists, left alone\n' ".env"
+else
+  cp .env.example .env
+  printf '  + %-10s created — fill in R2_USER_EMAIL and the keys\n' ".env"
+fi
+
 mkdir -p tasks
 chmod +x bin/r2 2>/dev/null || true
+
+# The upstream remote is how you receive system updates from the template.
+if git remote get-url upstream >/dev/null 2>&1; then
+  printf '  = %-10s already configured\n' "upstream"
+else
+  git remote add upstream "$UPSTREAM_URL"
+  printf '  + %-10s added → %s\n' "upstream" "$UPSTREAM_URL"
+fi
 
 cat <<'EOF'
 
 Next:
   1. Fill in _personal.md  — who you are, how you like to work
-  2. Fill in .env          — R2_USER_EMAIL is your folder; ask Petar for the keys
+  2. Fill in .env          — R2_USER_EMAIL is your R2 folder; ask Petar for keys
   3. npm install           — only if a task needs Playwright helper scripts
   4. Open Claude Code here and start a session
 
-Your tasks/, _personal.md, _tasks.md and .env are gitignored — they stay on
-your machine. `git pull` brings system updates without touching them.
+Day to day:
+  git push               back up YOUR tasks to YOUR repo (nobody else sees them)
+  git pull upstream main pick up system updates from the template
 EOF

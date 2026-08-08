@@ -17,7 +17,7 @@ This directory is a workspace for personal-assistant style tasks. Expect a wide 
 - General questions and curiosity-driven exploration
 - Coding and software development (when needed)
 
-Be flexible across domains. (sync check) Pick the right tool for each job (web search, file ops, code execution, browser automation). Keep a conversational, practical, solution-oriented tone.
+Be flexible across domains. Pick the right tool for each job (web search, file ops, code execution, browser automation). Keep a conversational, practical, solution-oriented tone.
 
 ---
 

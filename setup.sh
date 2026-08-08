@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# One-time setup after cloning your own assistant repo.
+# Mechanical setup after cloning your own assistant repo.
 # Safe to re-run — it never overwrites anything you've filled in.
+# The rest of setup is conversational: open Claude Code and say "set me up".
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -14,7 +15,7 @@ if [ -e .env ]; then
   printf '  = %-10s already exists, left alone\n' ".env"
 else
   cp .env.example .env
-  printf '  + %-10s created — fill in R2_USER_EMAIL and the keys\n' ".env"
+  printf '  + %-10s created\n' ".env"
 fi
 
 mkdir -p tasks
@@ -24,25 +25,32 @@ chmod +x bin/r2 2>/dev/null || true
 if git remote get-url upstream >/dev/null 2>&1; then
   printf '  = %-10s already configured\n' "upstream"
 else
-  git remote add upstream "$UPSTREAM_URL"
-  printf '  + %-10s added → %s\n' "upstream" "$UPSTREAM_URL"
+  git remote add upstream "$UPSTREAM_URL" 2>/dev/null \
+    && printf '  + %-10s added → %s\n' "upstream" "$UPSTREAM_URL" \
+    || printf '  ! %-10s could not add (not a git repo?)\n' "upstream"
 fi
 
 # Your history and the template's diverge by design — you commit tasks, the
 # template doesn't. Without this, `git pull upstream main` aborts asking how to
-# reconcile. Merge (not rebase) keeps your task commits untouched.
-git config pull.rebase false
-printf '  = %-10s merge on pull (keeps your commits intact)\n' "git config"
+# reconcile. Merge (not rebase) keeps your task commits intact.
+git config pull.rebase false 2>/dev/null || true
 
-cat <<'EOF'
+echo
+if grep -q 'SETUP-REQUIRED' _personal.md 2>/dev/null; then
+  cat <<'EOF'
+Next step — open Claude Code in this folder and say:
 
-Next:
-  1. Fill in _personal.md  — who you are, how you like to work
-  2. Fill in .env          — R2_USER_EMAIL is your R2 folder; ask Petar for keys
-  3. npm install           — only if a task needs Playwright helper scripts
-  4. Open Claude Code here and start a session
+    set me up
 
-Day to day:
-  git push               back up YOUR tasks to YOUR repo (nobody else sees them)
-  git pull upstream main pick up system updates from the template
+It will ask a few questions (who you are, whether you want to see the technical
+side or have it handled for you), then finish configuring everything including
+your R2 keys.
 EOF
+else
+  cat <<'EOF'
+Already configured. Day to day:
+
+    git push                 back up your tasks to your own repo
+    git pull upstream main   pick up system updates from the template
+EOF
+fi

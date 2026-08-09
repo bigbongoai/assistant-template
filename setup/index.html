@@ -31,16 +31,29 @@
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
 
   /* Auto-mode callout — mimics what they should see in the terminal */
-  .automode { background: var(--term-bg); border-radius: 12px; padding: 1.25rem 1.4rem; margin-bottom: 2rem; }
-  .automode p { color: #c9c9c4; margin: .7rem 0 0; font-size: .93rem; }
-  .automode kbd {
-    background: #3a3a36; color: #fff; border-radius: 5px; padding: .12em .5em;
-    font: 600 .85em ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid #4d4d47;
-  }
+  .automode { background: var(--term-bg); border-radius: 12px; padding: 1.4rem; margin-bottom: 2rem; }
+  .automode p { color: #c9c9c4; margin: 1rem 0 0; font-size: .93rem; }
+  .automode .step { color: #8f8f89; font-size: .74rem; text-transform: uppercase;
+                    letter-spacing: .09em; font-weight: 600; margin: 0 0 .9rem; }
   .chip {
     display: inline-block; font: 700 1.05rem ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: var(--amber); letter-spacing: .01em;
+    color: var(--amber); letter-spacing: .01em; white-space: nowrap;
   }
+
+  /* Keycap schematic — Mac keys are labelled with glyphs, so show the glyphs */
+  .keys { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+  .key {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 82px; padding: .5rem .8rem .45rem;
+    background: linear-gradient(#3d3d39, #2b2b28);
+    border: 1px solid #4f4f49; border-bottom: 3px solid #1a1a18;
+    border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,.35);
+  }
+  .key .glyph { font-size: 1.3rem; line-height: 1.1; color: #fff; }
+  .key .name  { font-size: .7rem; margin-top: .15rem; color: #b9b9b3; letter-spacing: .04em; }
+  .joiner { color: #7d7d77; font-size: 1.15rem; font-weight: 600; }
+  .result { color: #7d7d77; font-size: 1.2rem; }
+  @media (max-width: 460px) { .keys { gap: .55rem; } .key { min-width: 68px; } }
 
   label { display: block; margin-bottom: 1rem; }
   label > span { display: block; font-weight: 550; margin-bottom: .3rem; font-size: .93rem; }
@@ -89,9 +102,16 @@
     <p class="sub">Fill this in and go back to Claude — it'll do the rest. Only your name and how you want to work are required.</p>
 
     <div class="automode">
-      <span class="chip">⏵⏵ auto mode on</span>
-      <p>First, press <kbd>shift</kbd> + <kbd>tab</kbd> in Claude Code until you see that line above appear at the bottom of your terminal, in yellow.</p>
-      <p>It lets Claude run the setup without stopping to ask permission for every step. Without it you'll be approving prompts one at a time.</p>
+      <p class="step">First — turn on auto mode</p>
+      <div class="keys">
+        <div class="key"><span class="glyph">⇧</span><span class="name">shift</span></div>
+        <span class="joiner">+</span>
+        <div class="key"><span class="glyph">⇥</span><span class="name">tab</span></div>
+        <span class="result">→</span>
+        <span class="chip">⏵⏵ auto mode on</span>
+      </div>
+      <p>Press those two keys together in Claude Code — more than once if needed — until that yellow line appears at the bottom of your terminal.</p>
+      <p>It lets Claude run the whole setup without stopping to ask permission at every step. Without it, you'll be approving prompts one at a time.</p>
     </div>
 
     <form id="f">

@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Onboarding form output — contains R2 keys, deleted after setup applies it
+setup/answers.json
+
 # Claude's throwaway artifacts inside tasks (raw scrapes, Playwright snapshots,
 # scratch JSON). Your actual task work IS tracked — only temp/ is skipped.
 tasks/**/temp/

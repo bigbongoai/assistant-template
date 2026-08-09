@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your assistant</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⚙️</text></svg>">
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #fff; --ink: #1a1a18; --muted: #6b6b66;
+    --line: #e3e3de; --accent: #b5541f; --accent-soft: #fdf3ec;
+    --term-bg: #1e1e1c; --amber: #d99b1e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --card: #1f1f23; --ink: #ececea; --muted: #9a9a95;
+      --line: #33333a; --accent: #e08050; --accent-soft: #2a211c;
+      --term-bg: #0d0d0f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2.5rem 1.25rem 5rem; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .4rem; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 2rem; }
+  h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .09em;
+       color: var(--muted); margin: 2.2rem 0 .9rem; font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
+
+  /* Auto-mode callout — mimics what they should see in the terminal */
+  .automode { background: var(--term-bg); border-radius: 12px; padding: 1.25rem 1.4rem; margin-bottom: 2rem; }
+  .automode p { color: #c9c9c4; margin: .7rem 0 0; font-size: .93rem; }
+  .automode kbd {
+    background: #3a3a36; color: #fff; border-radius: 5px; padding: .12em .5em;
+    font: 600 .85em ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid #4d4d47;
+  }
+  .chip {
+    display: inline-block; font: 700 1.05rem ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--amber); letter-spacing: .01em;
+  }
+
+  label { display: block; margin-bottom: 1rem; }
+  label > span { display: block; font-weight: 550; margin-bottom: .3rem; font-size: .93rem; }
+  label small { display: block; color: var(--muted); font-weight: 400; margin-top: -.15rem; margin-bottom: .35rem; }
+  input[type=text], textarea, select {
+    width: 100%; padding: .6rem .7rem; font: inherit; font-size: .95rem;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea { min-height: 68px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+
+  /* Profile picker */
+  .picker { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  @media (max-width: 560px) { .picker { grid-template-columns: 1fr; } }
+  .picker input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt {
+    display: block; cursor: pointer; background: var(--card); border: 1.5px solid var(--line);
+    border-radius: 11px; padding: 1rem; height: 100%; transition: border-color .12s, background .12s;
+  }
+  .opt:hover { border-color: var(--muted); }
+  .picker input:checked + .opt { border-color: var(--accent); background: var(--accent-soft); }
+  .opt b { display: block; margin-bottom: .3rem; }
+  .opt span { color: var(--muted); font-size: .88rem; line-height: 1.45; }
+  .picker input:focus-visible + .opt { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .note { color: var(--muted); font-size: .87rem; margin: .5rem 0 0; }
+  button {
+    margin-top: 2rem; width: 100%; padding: .85rem; font: inherit; font-weight: 600;
+    background: var(--accent); color: #fff; border: 0; border-radius: 9px; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.07); }
+  button:disabled { opacity: .55; cursor: default; }
+  .done { text-align: center; padding: 3rem 1rem; }
+  .done h1 { margin-bottom: .8rem; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="form-view">
+    <h1>Let's set up your assistant</h1>
+    <p class="sub">Fill this in and go back to Claude — it'll do the rest. Only your name and how you want to work are required.</p>
+
+    <div class="automode">
+      <span class="chip">⏵⏵ auto mode on</span>
+      <p>First, press <kbd>shift</kbd> + <kbd>tab</kbd> in Claude Code until you see that line above appear at the bottom of your terminal, in yellow.</p>
+      <p>It lets Claude run the setup without stopping to ask permission for every step. Without it you'll be approving prompts one at a time.</p>
+    </div>
+
+    <form id="f">
+      <h2>About you</h2>
+      <div class="card">
+        <div class="row">
+          <label><span>Your name *</span><input type="text" name="name" required autocomplete="name"></label>
+          <label><span>What should Claude call you?</span><input type="text" name="address_as" placeholder="same as above"></label>
+        </div>
+        <div class="row">
+          <label><span>Where are you?</span><small>City or timezone</small><input type="text" name="location" placeholder="Sofia"></label>
+          <label><span>Language</span><input type="text" name="language" placeholder="English"></label>
+        </div>
+        <label><span>What do you do?</span><small>Helps Claude pitch explanations at the right level</small><input type="text" name="role" placeholder="Lead engineer / founder / designer…"></label>
+      </div>
+
+      <h2>How you want to work *</h2>
+      <div class="picker">
+        <div><input type="radio" id="p-tech" name="profile" value="technical" required>
+          <label class="opt" for="p-tech">
+            <b>Show me everything</b>
+            <span>I read code and use the terminal. Show commands, let me handle git myself.</span>
+          </label></div>
+        <div><input type="radio" id="p-non" name="profile" value="non-technical">
+          <label class="opt" for="p-non">
+            <b>Just handle it</b>
+            <span>Skip the technical detail. Save and back up my work for me, and keep it in plain language.</span>
+          </label></div>
+      </div>
+      <p class="note">You can switch later by telling Claude "the profile is wrong, set me up again".</p>
+
+      <h2>Preferences</h2>
+      <div class="card">
+        <label><span>Response style</span>
+          <select name="response_style">
+            <option value="balanced">Balanced</option>
+            <option value="terse">Short and to the point</option>
+            <option value="detailed">Detailed, show your reasoning</option>
+          </select></label>
+        <label><span>What will you mostly use this for?</span><textarea name="use_for" placeholder="Research, comparing suppliers, drafting documents…"></textarea></label>
+      </div>
+
+      <h2>Contact &amp; shipping <span style="text-transform:none;letter-spacing:0;font-weight:400">— optional, only if your work needs it</span></h2>
+      <div class="card">
+        <label><span>Delivery address</span><textarea name="shipping_address"></textarea></label>
+        <div class="row">
+          <label><span>Phone</span><input type="text" name="phone"></label>
+          <label><span>Preferred courier / pickup point</span><input type="text" name="courier"></label>
+        </div>
+        <label><span>Billing / invoicing details</span><textarea name="billing"></textarea></label>
+      </div>
+
+      <h2>File storage <span style="text-transform:none;letter-spacing:0;font-weight:400">— optional, ask Petar for the keys</span></h2>
+      <div class="card">
+        <label><span>Your work email</span><small>Becomes your private folder name, so you can't overwrite a colleague's files</small><input type="text" name="r2_user_email" placeholder="you@bigbongo.ai"></label>
+        <div class="row">
+          <label><span>Access key ID</span><input type="text" name="r2_access_key_id" autocomplete="off" spellcheck="false"></label>
+          <label><span>Secret key</span><input type="text" name="r2_secret_key" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <label><span>Endpoint</span><input type="text" name="r2_endpoint" placeholder="https://ACCOUNT_ID.eu.r2.cloudflarestorage.com" autocomplete="off" spellcheck="false"></label>
+        <p class="note">This page runs only on your own machine — nothing is sent anywhere else. Leave blank to set up storage later.</p>
+      </div>
+
+      <button type="submit" id="go">Finish setup</button>
+      <p class="note" id="err" style="color:#c0392b"></p>
+    </form>
+  </div>
+
+  <div id="done-view" class="hidden done">
+    <h1>All set</h1>
+    <p class="sub">Go back to Claude Code — it's finishing up now.<br>You can close this tab.</p>
+  </div>
+
+</div>
+<script>
+  const form = document.getElementById('f');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('go');
+    const err = document.getElementById('err');
+    btn.disabled = true; btn.textContent = 'Saving…'; err.textContent = '';
+    const data = Object.fromEntries(new FormData(form).entries());
+    try {
+      const res = await fetch('/submit', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      document.getElementById('form-view').classList.add('hidden');
+      document.getElementById('done-view').classList.remove('hidden');
+      window.scrollTo(0, 0);
+    } catch (ex) {
+      err.textContent = "Couldn't save — is the setup server still running in Claude Code? (" + ex.message + ")";
+      btn.disabled = false; btn.textContent = 'Finish setup';
+    }
+  });
+</script>
+</body>
+</html>

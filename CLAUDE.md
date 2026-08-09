@@ -23,27 +23,25 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 
 ## First run — set this workspace up
 
-**If `_personal.md` still contains `<!-- SETUP-REQUIRED -->`, do this before anything else**, even if the user opens with a task. Say you'll get them set up first, then take it in three short rounds — conversational, not an interrogation. Never dump all the questions at once.
+**If `_personal.md` contains `<!-- SETUP-REQUIRED -->`, this workspace is unconfigured. Run setup before anything else — whatever their first message is, even if it's a task.** Acknowledge in one line ("Let me get you set up first — takes a minute"), then drive the whole thing yourself.
 
-**Round 1 — who they are**
-Name (and how to address them), where they are / timezone, what language they want, what they do.
+**The person should never be asked to run a command, edit a file, or read a path.** They click a link and fill in a form. Everything else is yours.
 
-**Round 2 — how they work.** This is the important one, because it sets the profile:
+1. **Start the setup server in the background:** `python3 setup/server.py`. Its first line of stdout is the URL.
+2. **Tell them two things, plainly, no jargon:**
+   - Press `shift`+`tab` until **⏵⏵ auto mode on** shows in yellow at the bottom of the terminal — otherwise they'll be approving every step by hand.
+   - Open the URL and fill in the form.
+3. **Wait for `setup/answers.json` to appear.** Poll every few seconds. Don't fill the screen with status chatter while waiting.
+4. **Apply the answers:**
+   - Write `_personal.md` from them; set `**Profile:**` to `technical` or `non-technical`; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
+   - Write `.env` from the R2 fields, leaving blank any they skipped. **Never echo a key** into the chat, a task file, or a commit.
+   - Run `./setup.sh` for the mechanical parts (remote, `pull.rebase`, `chmod`).
+5. **Clean up:** stop the server and delete `setup/answers.json` — it holds their secret key.
+6. **Confirm in two or three lines**, then offer to start on whatever they originally asked for.
 
-> "Do you write code or use the terminal — or would you rather I handle all the technical parts myself?"
+If `python3` isn't available, fall back to asking the same questions conversationally — a few at a time, never all at once — then continue from step 4.
 
-Their answer picks one of the two profiles below. If it's ambiguous, ask one follow-up: *"When something needs a command run, should I show you the command or just do it?"* Do not guess from job title — founders sometimes code, and engineers sometimes don't want to.
-
-**Round 3 — the practical bits**
-What they expect to use this for most, response style (terse vs detailed), and — only if relevant to their work — shipping address, courier preference, billing details.
-
-**Then, without being asked:**
-
-1. Write `_personal.md` with their answers, set `**Profile:**` to `technical` or `non-technical`, and delete the `<!-- SETUP-REQUIRED -->` marker.
-2. Set up `.env` following their profile (see below). Never echo a key back to the user or into a task file.
-3. Confirm what you've set up in two or three lines, and suggest a first task.
-
-Re-run any part of this whenever they ask to "set me up again" or say the profile is wrong.
+Re-run this whenever they say "set me up again" or that the profile is wrong.
 
 ## Operating profiles
 

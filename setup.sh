@@ -22,7 +22,11 @@ mkdir -p tasks
 chmod +x bin/r2 2>/dev/null || true
 
 # The upstream remote is how you receive system updates from the template.
-if git remote get-url upstream >/dev/null 2>&1; then
+# Skipped for people outside Big Bongo (they can't read the private template)
+# and for local-only workspaces. Set NO_UPSTREAM=1 for those.
+if [ "${NO_UPSTREAM:-0}" = "1" ]; then
+  printf '  - %-10s skipped\n' "upstream"
+elif git remote get-url upstream >/dev/null 2>&1; then
   printf '  = %-10s already configured\n' "upstream"
 else
   git remote add upstream "$UPSTREAM_URL" 2>/dev/null \

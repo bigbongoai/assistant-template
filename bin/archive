@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# archive — move a finished task out of tasks/ into archive/, keeping its
+# folder name and internal structure exactly as they are.
+#
+#   archive 5                 by number
+#   archive lego wheels       by name (any fragment, case-insensitive)
+#   archive --restore 5       put it back in tasks/
+#   archive --list            show what's archived
+#
+# Nothing is deleted or renamed — only moved. Uses `git mv` inside a repo so
+# the move is staged as a rename and history follows the folder.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TASKS="$ROOT/tasks"
+ARCHIVE="$ROOT/archive"
+
+die() { printf 'archive: %s\n' "$*" >&2; exit 1; }
+
+in_git() { git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; }
+
+move() {  # move <src> <dest-dir>
+  mkdir -p "$2"
+  if in_git && git -C "$ROOT" ls-files --error-unmatch "$1" >/dev/null 2>&1; then
+    git -C "$ROOT" mv "$1" "$2/"
+  else
+    mv "$1" "$2/"
+  fi
+}
+
+# Find exactly one folder in $1 matching the query in $2..
+find_one() {
+  local dir="$1"; shift
+  local query="$*"
+  [ -d "$dir" ] || die "no $dir directory yet"
+
+  local matches=()
+  local name
+  # A bare number matches the task's leading number: "5" and "05" both work.
+  if [[ "$query" =~ ^[0-9]+$ ]]; then
+    local padded
+    padded=$(printf '%02d' "$query")
+    for name in "$dir"/*/; do
+      name=$(basename "$name")
+      case "$name" in "$padded".*|"$query".*) matches+=("$name") ;; esac
+    done
+  else
+    # Every word in the query must appear somewhere in the folder name, in any
+    # order. A trailing "s" is optional, so "lego wheels" finds
+    # "05.lego-wheel-identification".
+    local lower word ok
+    for name in "$dir"/*/; do
+      name=$(basename "$name")
+      lower=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+      ok=1
+      for word in $(printf '%s' "$query" | tr '[:upper:]' '[:lower:]'); do
+        case "$lower" in
+          *"$word"*) ;;
+          *"${word%s}"*) ;;
+          *) ok=0; break ;;
+        esac
+      done
+      [ "$ok" = 1 ] && matches+=("$name")
+    done
+  fi
+
+  if [ ${#matches[@]} -eq 0 ]; then
+    die "nothing in $(basename "$dir")/ matches '$query'"
+  elif [ ${#matches[@]} -gt 1 ]; then
+    printf 'archive: "%s" matches several — be more specific:\n' "$query" >&2
+    printf '  %s\n' "${matches[@]}" >&2
+    exit 1
+  fi
+  printf '%s' "${matches[0]}"
+}
+
+case "${1:---help}" in
+  --list|-l)
+    if [ -d "$ARCHIVE" ] && [ -n "$(ls -A "$ARCHIVE" 2>/dev/null)" ]; then
+      echo "Archived:"
+      for d in "$ARCHIVE"/*/; do printf '  %s\n' "$(basename "$d")"; done
+    else
+      echo "Nothing archived yet."
+    fi
+    ;;
+
+  --restore|-r)
+    shift
+    [ $# -ge 1 ] || die "usage: archive --restore <number|name>"
+    task=$(find_one "$ARCHIVE" "$@")
+    move "$ARCHIVE/$task" "$TASKS"
+    rmdir "$ARCHIVE" 2>/dev/null || true
+    printf 'restored  archive/%s → tasks/%s\n' "$task" "$task"
+    echo "Remember to move its line back in _tasks.md."
+    ;;
+
+  --help|-h)
+    sed -n '3,14p' "${BASH_SOURCE[0]}" | sed 's/^#\{0,1\} \{0,1\}//'
+    ;;
+
+  *)
+    task=$(find_one "$TASKS" "$@")
+    move "$TASKS/$task" "$ARCHIVE"
+    printf 'archived  tasks/%s → archive/%s\n' "$task" "$task"
+    echo "Remember to move its line to the Archived section of _tasks.md."
+    ;;
+esac

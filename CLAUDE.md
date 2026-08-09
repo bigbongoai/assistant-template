@@ -32,10 +32,27 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    - Press `shift`+`tab` until **⏵⏵ auto mode on** shows in yellow at the bottom of the terminal — otherwise they'll be approving every step by hand.
    - Open the URL and fill in the form.
 3. **Wait for `setup/answers.json` to appear.** Poll every few seconds. Don't fill the screen with status chatter while waiting.
-4. **Apply the answers:**
-   - Write `_personal.md` from them; set `**Profile:**` to `technical` or `non-technical`; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
-   - Write `.env` from the R2 fields, leaving blank any they skipped. **Never echo a key** into the chat, a task file, or a commit.
-   - Run `./setup.sh` for the mechanical parts (remote, `pull.rebase`, `chmod`).
+4. **Apply the answers.** The form returns three routing fields — `affiliation`, `backup`, `storage` — and each is independent. Handle every combination:
+
+   **Always:** write `_personal.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
+
+   **`backup: github`** — create their repo and wire it up, doing the commands yourself:
+   - `affiliation: bigbongo` → `gh repo create bigbongoai/assistant-<name> --private`
+   - `affiliation: independent` → `gh repo create <their-github-user>/assistant --private`
+   - Then point `origin` at it and push. Keep `upstream` on the template **only if they can read it** — an outside user cannot pull from a private company repo, so drop the remote and tell them updates will be handed over manually.
+   - If `gh` isn't installed or isn't logged in, say so plainly and fall back to `backup: local` rather than leaving a half-configured repo.
+
+   **`backup: local`** — remove `origin`, don't push anything, and tell them in one line that their work lives only on this machine. Never run `git push` for them afterwards.
+
+   **`storage: bigbongo`** — write the R2 keys they pasted; leave `R2_BUCKET_PRIVATE` and `R2_BUCKET_PUBLIC` both as `assistant`. Tell them plainly that this bucket is served publicly, so anything uploaded is readable by anyone with the link.
+
+   **`storage: own`** — write their endpoint, bucket and keys. If they gave no public URL, leave `R2_PUBLIC_BASE` empty; `r2 share` will refuse rather than print a dead link.
+
+   **`storage: none`** — leave the R2 fields empty. `bin/r2` already explains itself if called. Don't offer uploads in later sessions unless they ask.
+
+   **Never echo a key** into the chat, a task file, or a commit.
+
+   Then run `./setup.sh` for the mechanical parts (`pull.rebase`, `chmod`).
 5. **Clean up:** stop the server and delete `setup/answers.json` — it holds their secret key.
 6. **Confirm in two or three lines**, then offer to start on whatever they originally asked for.
 
@@ -88,6 +105,15 @@ When it says `non-technical`:
 2. When discussing a specific task, read the entire task folder to get context.
 3. Record work, findings, and outputs in the appropriate step folder.
 4. Update `_tasks.md` when a new task is created.
+
+### Archiving finished tasks
+When the user says "archive 5", "archive lego wheels", or similar, run `./bin/archive <what they said>`. It moves the task folder from `tasks/` to `archive/` with its name and internal structure untouched, using `git mv` so history follows.
+
+- Pass their words through as-is — it matches on a task number or on any words from the name, in any order, and tolerates a plural ("lego wheels" finds `05.lego-wheel-identification`).
+- If it reports several matches, show them the list and ask which one. Never guess.
+- Afterwards, move that task's line in `_tasks.md` into the `## Archived` section — the script deliberately doesn't edit that file.
+- `./bin/archive --restore <what>` puts it back; `--list` shows what's archived.
+- Archived tasks stay in the repo and stay committed. Archiving is tidying, not deleting. Never delete a task folder unless the user explicitly asks.
 
 ### Personal Preferences
 - Maintained in `_personal.md`.

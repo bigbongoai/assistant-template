@@ -37,14 +37,14 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    **Always:** write `_personal.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
 
    **`backup: github`** — create their repo and wire it up, doing the commands yourself:
-   - `affiliation: bigbongo` → `gh repo create bigbongoai/assistant-<name> --private`
+   - `affiliation: org` → `gh repo create <github_org>/assistant-<name> --private`, taking `github_org` from `assistant.config.json`
    - `affiliation: independent` → `gh repo create <their-github-user>/assistant --private`
    - Then point `origin` at it and push. Keep `upstream` on the template **only if they can read it** — an outside user cannot pull from a private company repo, so drop the remote and tell them updates will be handed over manually.
    - If `gh` isn't installed or isn't logged in, say so plainly and fall back to `backup: local` rather than leaving a half-configured repo.
 
    **`backup: local`** — remove `origin`, don't push anything, and tell them in one line that their work lives only on this machine. Never run `git push` for them afterwards.
 
-   **`storage: bigbongo`** — write the R2 keys they pasted; leave `R2_BUCKET_PRIVATE` and `R2_BUCKET_PUBLIC` both as `assistant`. Tell them plainly that this bucket is served publicly, so anything uploaded is readable by anyone with the link.
+   **`storage: org`** — write the keys they pasted and set the bucket from `assistant.config.json`. Leave `R2_PUBLIC_BASE` empty unless a custom domain really does serve the bucket publicly — `r2 share` issues links that expire, and that only means something while the plain URL doesn't work.
 
    **`storage: own`** — write their endpoint, bucket and keys. If they gave no public URL, leave `R2_PUBLIC_BASE` empty; `r2 share` will refuse rather than print a dead link.
 
@@ -131,10 +131,11 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 Deliverables live in git, but big binaries and anything meant to be handed to a colleague go to Cloudflare R2 via `./bin/r2`. Never call `aws s3` directly — the wrapper is what keeps writes inside the user's own folder, and R2 has no versioning, so an overwrite or delete cannot be undone.
 
 - `./bin/r2 put <file> [dest]` — private bucket, under the user's own folder
-- `./bin/r2 share <file> [dest]` — **public** bucket; prints a link anyone can open
+- `./bin/r2 share <file> [dest]` — stores it and prints a signed link that expires (1 day by default)
+- `./bin/r2 link <path> [seconds]` — re-issue a link for something already uploaded
 - `./bin/r2 ls` / `./bin/r2 rm <path>` — scoped to the user's folder
 
-`share` publishes to the open internet. Use it only for things the user has asked to send someone, and say so plainly when you do. Never `share` anything containing credentials, infrastructure detail, personal data, or client material.
+A `share` link works for anyone holding it, with no login, until it expires. Use it only for things the user asked to send someone, and say when the link dies. Never `share` anything containing credentials, infrastructure detail, personal data, or client material.
 
 ## Reference examples
 

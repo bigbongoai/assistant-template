@@ -20,9 +20,25 @@ ANSWERS = HERE / "answers.json"
 FIRST_PORT = int(os.environ.get("PORT", "8899"))
 
 
+CONFIG = HERE.parent / "assistant.config.json"
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(HERE), **kwargs)
+
+    def do_GET(self):
+        # The form reads org names and labels from here, so one file adapts
+        # this template to any team. It lives at the repo root, not in setup/.
+        if self.path.rstrip("/") == "/config.json":
+            body = CONFIG.read_bytes() if CONFIG.exists() else b"{}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 
     def do_POST(self):
         if self.path.rstrip("/") != "/submit":

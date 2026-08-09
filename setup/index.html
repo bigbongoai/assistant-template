@@ -145,15 +145,15 @@
 
       <h2>Where you're using this *</h2>
       <div class="picker">
-        <div><input type="radio" id="a-bb" name="affiliation" value="bigbongo" required>
+        <div><input type="radio" id="a-bb" name="affiliation" value="org" required>
           <label class="opt" for="a-bb">
-            <b>I'm at Big Bongo</b>
-            <span>Your work repo goes in the company org, and Petar provides the storage keys.</span>
+            <b>I'm at <span data-org>the company</span></b>
+            <span>Your work repo goes in the company org, and <span data-admin>the admin</span> provides the storage keys.</span>
           </label></div>
         <div><input type="radio" id="a-ind" name="affiliation" value="independent">
           <label class="opt" for="a-ind">
             <b>On my own</b>
-            <span>Everything lives under your own accounts. Nothing is tied to Big Bongo.</span>
+            <span>Everything lives under your own accounts. Nothing is tied to <span data-org>the company</span>.</span>
           </label></div>
       </div>
 
@@ -176,9 +176,9 @@
 
       <h2>Storage for large files *</h2>
       <div class="picker" style="grid-template-columns:1fr">
-        <div><input type="radio" id="s-bb" name="storage" value="bigbongo" required>
-          <label class="opt" for="s-bb"><b>Big Bongo storage</b>
-            <span>Shared bucket, your own folder inside it. Note it's served on a public domain — anything uploaded is readable by anyone with the link.</span></label></div>
+        <div><input type="radio" id="s-bb" name="storage" value="org" required>
+          <label class="opt" for="s-bb"><b data-storage-label>Company storage</b>
+            <span data-storage-note>Shared bucket, your own folder inside it.</span></label></div>
         <div><input type="radio" id="s-own" name="storage" value="own">
           <label class="opt" for="s-own"><b>My own storage</b>
             <span>Any S3-compatible service — Cloudflare R2, AWS S3, Backblaze B2.</span></label></div>
@@ -186,7 +186,7 @@
           <label class="opt" for="s-none"><b>None — keep big files on my machine</b>
             <span>Nothing is uploaded anywhere. You can turn this on later.</span></label></div>
       </div>
-      <p class="note hidden" id="bb-storage-note">Big Bongo storage needs a company account — pick your own storage, or none.</p>
+      <p class="note hidden" id="bb-storage-note"><span data-storage-label>Company storage</span> needs a company account — pick your own storage, or none.</p>
 
       <h2>Preferences</h2>
       <div class="card">
@@ -211,6 +211,7 @@
 
       <div id="storage-extra" class="hidden">
         <h2>Storage keys</h2>
+        <p class="note" id="storage-keys-hint">Use any S3-compatible service — Cloudflare R2, AWS S3, Backblaze B2.</p>
         <div class="card">
           <label><span>Your email</span><small>Becomes your folder name, so you can't overwrite someone else's files</small><input type="text" name="r2_user_email" placeholder="you@example.com"></label>
           <div class="row">
@@ -238,6 +239,19 @@
 
 </div>
 <script>
+  // One config file at the repo root adapts this template to any team.
+  fetch('/config.json').then(r => r.json()).then(cfg => {
+    const put = (sel, val) => { if (val) document.querySelectorAll(sel).forEach(e => e.textContent = val); };
+    put('[data-org]', cfg.org_name);
+    put('[data-admin]', cfg.admin_contact);
+    put('[data-storage-label]', cfg.storage && cfg.storage.label);
+    put('[data-storage-note]', cfg.storage && cfg.storage.note);
+    if (cfg.admin_contact) {
+      const h = document.querySelector('#storage-keys-hint');
+      if (h) h.textContent = `Ask ${cfg.admin_contact} for the keys, or use any S3-compatible service of your own.`;
+    }
+  }).catch(() => { /* generic wording already in the markup */ });
+
   // Show only the follow-up fields the chosen route actually needs.
   const $ = (s) => document.querySelector(s);
   const gitExtra = $('#git-extra'), storExtra = $('#storage-extra'), ownBuckets = $('#own-buckets');

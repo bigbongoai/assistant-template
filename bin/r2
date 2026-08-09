@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 #
-# r2 — email-scoped uploads to Cloudflare R2.
+# r2 — email-scoped file storage on any S3-compatible service.
 #
-# Every write lands under your own folder ($R2_USER_EMAIL) in the private
-# bucket, so a mistyped path can only ever hit your own files. This matters
-# because R2 has no object versioning: an overwrite or delete is permanent
-# and immediate, with no trash and no restore.
+# Every write lands under your own folder ($R2_USER_EMAIL), so a mistyped path
+# can only ever hit your own files. That matters because R2 has no object
+# versioning: an overwrite or delete is permanent and immediate, with no trash
+# and no restore.
 #
 # This stops accidents, not people. Anyone holding the token can still run
 # `aws s3` directly against any folder. Accidents are the realistic risk.
+#
+# `share` hands out a signed link that expires (1 day by default) rather than
+# a permanent public URL, so a leaked link stops working on its own. That only
+# holds if no custom domain is serving the bucket — if one is, the script says
+# so, because then the expiry is decoration.
 
 set -euo pipefail
 
@@ -20,13 +25,15 @@ usage() {
   cat <<'EOF'
 r2 — email-scoped uploads to Cloudflare R2
 
-  r2 put   <file> [dest]   upload to your folder in the private bucket
-  r2 share <file> [dest]   upload to the PUBLIC bucket, print a shareable link
+  r2 put   <file> [dest]   store in your own folder
+  r2 share <file> [dest]   store + print a signed link that expires
+  r2 link  <path> [secs]   re-issue a signed link for something already there
   r2 ls    [prefix]        list your folder
   r2 rm    <path>          delete one file inside your folder
-  r2 url   <path>          print the public URL for a shared path
 
 A dest ending in "/" is treated as a folder; otherwise it is the filename.
+Share links last 1 day by default — set R2_SHARE_TTL in .env to change it
+(7 days is the maximum any signed URL can last).
 EOF
 }
 
@@ -52,14 +59,16 @@ case "$R2_ENDPOINT" in
 esac
 
 BUCKET_PRIVATE="${R2_BUCKET_PRIVATE:-assistant}"
-BUCKET_PUBLIC="${R2_BUCKET_PUBLIC:-assistant}"
-PUBLIC_BASE="${R2_PUBLIC_BASE:-https://assistant.bigbongo.ai}"
+BUCKET_PUBLIC="${R2_BUCKET_PUBLIC:-$BUCKET_PRIVATE}"
 
-# Big Bongo currently uses one bucket for both, and it is served on a public
-# custom domain. When that's the case `put` is not private, and saying so is
-# the difference between a habit and an incident.
-SHARED_BUCKET=false
-[ "$BUCKET_PRIVATE" = "$BUCKET_PUBLIC" ] && SHARED_BUCKET=true
+# How long a `share` link stays alive. One day by default; SigV4 caps at 7.
+SHARE_TTL="${R2_SHARE_TTL:-86400}"
+[ "$SHARE_TTL" -le 604800 ] 2>/dev/null || die "R2_SHARE_TTL cannot exceed 604800 (7 days) — that's a signing limit, not ours"
+
+# A public base URL means a custom domain is serving this bucket to the open
+# internet, so nothing in it is private. Empty is the safe configuration:
+# `share` presigns instead, and links expire on their own.
+PUBLIC_BASE="${R2_PUBLIC_BASE:-}"
 
 ME="$R2_USER_EMAIL"
 # Public links use only the local part, to keep full addresses off the open web.
@@ -70,6 +79,13 @@ export AWS_SECRET_ACCESS_KEY="$R2_SECRET_KEY"
 export AWS_DEFAULT_REGION=auto
 
 s3() { command aws s3 --endpoint-url "$R2_ENDPOINT" "$@"; }
+
+human_ttl() {
+  if   [ "$1" -ge 86400 ]; then printf '%s day(s)'    "$(( $1 / 86400 ))"
+  elif [ "$1" -ge 3600 ];  then printf '%s hour(s)'   "$(( $1 / 3600 ))"
+  else                          printf '%s minute(s)' "$(( $1 / 60 ))"
+  fi
+}
 
 # Reject anything that could climb out of the prefix.
 # Must be called as a statement in the main shell: a `die` inside $( ) would
@@ -103,25 +119,38 @@ case "$cmd" in
     key="$(key_for "$ME" "$1" "${2:-}")"
     s3 cp "$1" "s3://$BUCKET_PRIVATE/$key" \
       || die "upload failed — does bucket '$BUCKET_PRIVATE' exist and is it in your token's scope?"
-    if [ "$SHARED_BUCKET" = true ]; then
-      printf '\nuploaded to your folder: %s\n' "$key"
-      printf 'NOTE: this bucket is served publicly — anyone with the URL can read it:\n  %s/%s\n' "$PUBLIC_BASE" "$key"
-    else
-      printf '\nprivate  s3://%s/%s\n' "$BUCKET_PRIVATE" "$key"
+    printf '\nstored  s3://%s/%s\n' "$BUCKET_PRIVATE" "$key"
+    if [ -n "$PUBLIC_BASE" ]; then
+      printf 'NOTE: a public domain serves this bucket, so this is readable by anyone with the URL:\n  %s/%s\n' "$PUBLIC_BASE" "$key"
     fi
     ;;
 
   share)
     [ $# -ge 1 ] || die "usage: r2 share <file> [dest]"
     [ -f "$1" ] || die "no such file: $1"
-    [ -n "$PUBLIC_BASE" ] || die "no public URL configured for this bucket.
-    Set R2_PUBLIC_BASE in .env to the domain that serves it, or use 'r2 put'
-    and hand the file over another way."
     check "${2:-}"
     key="$(key_for "$PUB_NS" "$1" "${2:-}")"
     s3 cp "$1" "s3://$BUCKET_PUBLIC/$key" \
       || die "upload failed — does bucket '$BUCKET_PUBLIC' exist and is it in your token's scope?"
-    printf '\nPUBLIC — anyone with this link can open it:\n  %s/%s\n' "$PUBLIC_BASE" "$key"
+    url=$(command aws s3 presign "s3://$BUCKET_PUBLIC/$key" \
+            --endpoint-url "$R2_ENDPOINT" --expires-in "$SHARE_TTL") \
+      || die "could not sign a link for $key"
+    printf '\nLink, valid for %s:\n  %s\n' "$(human_ttl "$SHARE_TTL")" "$url"
+    printf '\nAnyone holding it can open it until then — no login. Re-issue later with:\n  r2 link %s\n' "$key"
+    if [ -n "$PUBLIC_BASE" ]; then
+      printf '\nWARNING: a public domain also serves this bucket, so the file is reachable\nwithout the signed link and the expiry buys you nothing:\n  %s/%s\n' "$PUBLIC_BASE" "$key"
+    fi
+    ;;
+
+  link)
+    [ $# -ge 1 ] || die "usage: r2 link <path-in-bucket> [seconds]"
+    check "$1"
+    ttl="${2:-$SHARE_TTL}"
+    [ "$ttl" -le 604800 ] 2>/dev/null || die "max is 604800 (7 days)"
+    url=$(command aws s3 presign "s3://$BUCKET_PUBLIC/${1#/}" \
+            --endpoint-url "$R2_ENDPOINT" --expires-in "$ttl") \
+      || die "could not sign a link for $1"
+    printf 'Link, valid for %s:\n  %s\n' "$(human_ttl "$ttl")" "$url"
     ;;
 
   ls)
@@ -140,17 +169,14 @@ case "$cmd" in
     s3 rm "s3://$BUCKET_PRIVATE/$ME/$p"
     ;;
 
-  url)
-    [ $# -ge 1 ] || die "usage: r2 url <path>"
-    check "$1"
-    p="${1#/}"
-    printf '%s/%s/%s\n' "$PUBLIC_BASE" "$PUB_NS" "$p"
-    ;;
 
   help|--help|-h)
     usage
-    printf '\nyou are: %s\n  private: s3://%s/%s/\n  public:  %s/%s/\n' \
-      "$ME" "$BUCKET_PRIVATE" "$ME" "$PUBLIC_BASE" "$PUB_NS"
+    printf '\nyou are: %s\n  your folder:  s3://%s/%s/\n  shared under: s3://%s/%s/\n  links expire: %s\n' \
+      "$ME" "$BUCKET_PRIVATE" "$ME" "$BUCKET_PUBLIC" "$PUB_NS" "$(human_ttl "$SHARE_TTL")"
+    if [ -n "$PUBLIC_BASE" ]; then
+      printf '  WARNING: %s serves this bucket publicly — nothing in it is private\n' "$PUBLIC_BASE"
+    fi
     ;;
 
   *) die "unknown command '$cmd' — try: r2 help" ;;

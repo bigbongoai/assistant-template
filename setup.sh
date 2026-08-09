@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-UPSTREAM_URL="git@github.com:bigbongoai/assistant-template.git"
+# Read the template's own URL from the config, so a fork only edits one file.
+UPSTREAM_URL=$(python3 -c "import json;print(json.load(open('assistant.config.json'))['template_repo'])" 2>/dev/null || echo "")
 
 echo "Setting up your assistant workspace:"
 
@@ -22,9 +23,9 @@ mkdir -p tasks
 chmod +x bin/r2 2>/dev/null || true
 
 # The upstream remote is how you receive system updates from the template.
-# Skipped for people outside Big Bongo (they can't read the private template)
+# Skipped for people outside the org (they may not be able to read the template)
 # and for local-only workspaces. Set NO_UPSTREAM=1 for those.
-if [ "${NO_UPSTREAM:-0}" = "1" ]; then
+if [ "${NO_UPSTREAM:-0}" = "1" ] || [ -z "$UPSTREAM_URL" ]; then
   printf '  - %-10s skipped\n' "upstream"
 elif git remote get-url upstream >/dev/null 2>&1; then
   printf '  = %-10s already configured\n' "upstream"

@@ -1,0 +1,15 @@
+{
+  "_comment": "Org-specific settings. Fork this template and edit this one file to adopt it for your own team. Everything else is generic.",
+
+  "org_name": "Big Bongo",
+  "github_org": "bigbongoai",
+  "template_repo": "git@github.com:bigbongoai/assistant-template.git",
+  "admin_contact": "Petar",
+
+  "storage": {
+    "label": "Big Bongo storage",
+    "bucket": "assistant",
+    "note": "Shared bucket, your own folder inside it. Share links expire after a day.",
+    "share_ttl_seconds": 86400
+  }
+}

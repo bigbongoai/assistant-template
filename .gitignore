@@ -6,6 +6,10 @@
 # Onboarding form output — contains R2 keys, deleted after setup applies it
 setup/answers.json
 
+# Organisation overlay — org settings and possibly storage credentials.
+# Handed out internally; never belongs in a shared repo.
+assistant.config.local.json
+
 # Claude's throwaway artifacts inside tasks (raw scrapes, Playwright snapshots,
 # scratch JSON). Your actual task work IS tracked — only temp/ is skipped.
 tasks/**/temp/

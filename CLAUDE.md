@@ -37,14 +37,14 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    **Always:** write `_personal.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
 
    **`backup: github`** — create their repo and wire it up, doing the commands yourself:
-   - `affiliation: org` → `gh repo create <github_org>/assistant-<name> --private`, taking `github_org` from `assistant.config.json`
+   - `affiliation: org` → `gh repo create <github_org>/assistant-<name> --private`, taking `github_org` from the merged config (`assistant.config.json` overlaid with `assistant.config.local.json` if present)
    - `affiliation: independent` → `gh repo create <their-github-user>/assistant --private`
    - Then point `origin` at it and push. Keep `upstream` on the template **only if they can read it** — an outside user cannot pull from a private company repo, so drop the remote and tell them updates will be handed over manually.
    - If `gh` isn't installed or isn't logged in, say so plainly and fall back to `backup: local` rather than leaving a half-configured repo.
 
    **`backup: local`** — remove `origin`, don't push anything, and tell them in one line that their work lives only on this machine. Never run `git push` for them afterwards.
 
-   **`storage: org`** — write the keys they pasted and set the bucket from `assistant.config.json`. Leave `R2_PUBLIC_BASE` empty unless a custom domain really does serve the bucket publicly — `r2 share` issues links that expire, and that only means something while the plain URL doesn't work.
+   **`storage: org`** — if `assistant.config.local.json` has `storage.credentials`, copy those straight into `.env` and don't ask for anything. Otherwise write the keys they pasted, taking the bucket from the merged config. Leave `R2_PUBLIC_BASE` empty unless a custom domain really does serve the bucket publicly — `r2 share` issues links that expire, and that only means something while the plain URL doesn't work.
 
    **`storage: own`** — write their endpoint, bucket and keys. If they gave no public URL, leave `R2_PUBLIC_BASE` empty; `r2 share` will refuse rather than print a dead link.
 

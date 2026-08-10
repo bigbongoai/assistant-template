@@ -7,8 +7,22 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# Read the template's own URL from the config, so a fork only edits one file.
-UPSTREAM_URL=$(python3 -c "import json;print(json.load(open('assistant.config.json'))['template_repo'])" 2>/dev/null || echo "")
+# Where system updates come from. Usually the `upstream` remote already exists
+# (renamed when you cloned), so this stays empty and we leave it alone. An org
+# overlay can set template_repo to point somewhere else.
+UPSTREAM_URL=$(python3 - <<'PY' 2>/dev/null || true
+import json, pathlib
+cfg = {}
+for name in ("assistant.config.json", "assistant.config.local.json"):
+    p = pathlib.Path(name)
+    if p.exists():
+        try:
+            cfg.update(json.loads(p.read_text()))
+        except ValueError:
+            pass
+print(cfg.get("template_repo") or "")
+PY
+)
 
 echo "Setting up your assistant workspace:"
 
@@ -25,10 +39,10 @@ chmod +x bin/r2 2>/dev/null || true
 # The upstream remote is how you receive system updates from the template.
 # Skipped for people outside the org (they may not be able to read the template)
 # and for local-only workspaces. Set NO_UPSTREAM=1 for those.
-if [ "${NO_UPSTREAM:-0}" = "1" ] || [ -z "$UPSTREAM_URL" ]; then
-  printf '  - %-10s skipped\n' "upstream"
-elif git remote get-url upstream >/dev/null 2>&1; then
+if git remote get-url upstream >/dev/null 2>&1; then
   printf '  = %-10s already configured\n' "upstream"
+elif [ "${NO_UPSTREAM:-0}" = "1" ] || [ -z "$UPSTREAM_URL" ]; then
+  printf '  - %-10s none set (system updates will be handed over manually)\n' "upstream"
 else
   git remote add upstream "$UPSTREAM_URL" 2>/dev/null \
     && printf '  + %-10s added → %s\n' "upstream" "$UPSTREAM_URL" \

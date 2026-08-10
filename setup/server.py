@@ -20,7 +20,35 @@ ANSWERS = HERE / "answers.json"
 FIRST_PORT = int(os.environ.get("PORT", "8899"))
 
 
-CONFIG = HERE.parent / "assistant.config.json"
+ROOT = HERE.parent
+CONFIG = ROOT / "assistant.config.json"
+CONFIG_LOCAL = ROOT / "assistant.config.local.json"
+
+
+def load_config():
+    """Committed defaults, overlaid with the org file if one was dropped in.
+
+    Credentials are stripped before this reaches the browser — the form only
+    needs to know they exist, not what they are.
+    """
+    def read(p):
+        try:
+            return json.loads(p.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    cfg = read(CONFIG)
+    for key, val in read(CONFIG_LOCAL).items():
+        if isinstance(val, dict) and isinstance(cfg.get(key), dict):
+            cfg[key] = {**cfg[key], **val}
+        else:
+            cfg[key] = val
+
+    storage = cfg.get("storage")
+    if isinstance(storage, dict) and storage.pop("credentials", None):
+        storage["credentials_provided"] = True
+    cfg.pop("_comment", None)
+    return cfg
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -28,10 +56,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(HERE), **kwargs)
 
     def do_GET(self):
-        # The form reads org names and labels from here, so one file adapts
-        # this template to any team. It lives at the repo root, not in setup/.
+        # The form adapts itself from this: with no org overlay present it
+        # simply doesn't offer company options.
         if self.path.rstrip("/") == "/config.json":
-            body = CONFIG.read_bytes() if CONFIG.exists() else b"{}"
+            body = json.dumps(load_config()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -70,8 +98,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass  # keep Claude's terminal readable
 
 
-class Server(socketserver.TCPServer):
+class Server(socketserver.ThreadingTCPServer):
+    # Threaded on purpose: browsers hold keep-alive connections open, and a
+    # single-threaded server would then refuse to answer anything else —
+    # including the form's POST — until that connection died.
     allow_reuse_address = True
+    daemon_threads = True
 
 
 def main():

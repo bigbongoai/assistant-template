@@ -11,7 +11,7 @@ Setup is conversational. You open Claude Code, say anything, and it walks you th
 **1. Copy the template.** Clone it, then point `origin` at your own repo — this keeps the shared history, which is what lets you pull updates later:
 
 ```sh
-git clone https://github.com/bigbongoai/assistant-template.git ~/www/assistant
+git clone <template-url> ~/www/assistant
 cd ~/www/assistant
 git remote rename origin upstream
 ```
@@ -85,22 +85,47 @@ git push                  # your tasks, to your own repo
 
 They never cross. Your tasks are yours; the system flows one way, from the template out.
 
-## Adopting this for your own team
+## Adopting this for your team
 
-Everything org-specific lives in **`assistant.config.json`** — org name, GitHub org, template URL, who to ask for storage keys, bucket name. Fork this repo, edit that one file, and the setup form and scripts follow along. Nothing else is hardcoded.
+This repo is deliberately generic — it names no company and ships no credentials. To adopt it, you don't fork or edit it. You hand your people **one file**:
 
-## For Big Bongo people
+```
+assistant.config.local.json        ← gitignored, never committed
+```
 
-- Your repo goes in the `bigbongoai` org: `gh repo create bigbongoai/assistant-YOURNAME --private`. It's private to you and the org owner; colleagues can't see it.
-- Ask Petar for storage keys.
-- Improvements worth sharing go in the template — tell Petar and everyone gets them on their next `git pull upstream main`.
+Drop it in the workspace root and setup adapts: the form offers your organisation, uses your bucket, and — if you include credentials — configures storage with nothing for anyone to paste.
+
+```json
+{
+  "org_name": "Acme",
+  "github_org": "acme-inc",
+  "template_repo": "git@github.com:acme-inc/assistant-template.git",
+  "admin_contact": "Dana",
+  "storage": {
+    "label": "Acme storage",
+    "bucket": "assistant",
+    "note": "Shared bucket, your own folder inside it.",
+    "credentials": {
+      "R2_ACCESS_KEY_ID": "…",
+      "R2_SECRET_KEY": "…",
+      "R2_ENDPOINT": "https://….r2.cloudflarestorage.com",
+      "R2_BUCKET_PRIVATE": "assistant",
+      "R2_BUCKET_PUBLIC": "assistant"
+    }
+  }
+}
+```
+
+Everything is optional — include only what you want to preset. Without the file, the workspace is a standalone personal assistant and never mentions an organisation at all.
+
+Two things worth knowing: credentials in that file end up in a teammate's `.env`, so distribute it over something authenticated rather than email, and it should be a token scoped to just that bucket. The setup page never receives the credentials — the local server strips them and passes only a "already configured" flag to the browser.
 
 ## What's in the box
 
 | File / folder | Purpose |
 | --- | --- |
 | `CLAUDE.md` | System instructions Claude reads every session — onboarding, profiles, task workflow, delivery rules |
-| `assistant.config.json` | The only org-specific file |
+| `assistant.config.json` | Generic defaults. An `assistant.config.local.json` beside it (gitignored) overrides them for a team |
 | `_personal.md` | Your preferences and profile. Claude fills it in during setup, then keeps adding to it |
 | `_tasks.md` | Index of your tasks, kept updated by Claude |
 | `tasks/` · `archive/` | Your work, active and archived |

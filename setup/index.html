@@ -143,6 +143,7 @@
       </div>
       <p class="note">You can switch later by telling Claude "the profile is wrong, set me up again".</p>
 
+      <div id="affiliation-section">
       <h2>Where you're using this *</h2>
       <div class="picker">
         <div><input type="radio" id="a-bb" name="affiliation" value="org" required>
@@ -155,6 +156,7 @@
             <b>On my own</b>
             <span>Everything lives under your own accounts. Nothing is tied to <span data-org>the company</span>.</span>
           </label></div>
+      </div>
       </div>
 
       <h2>Backing up your work *</h2>
@@ -176,7 +178,7 @@
 
       <h2>Storage for large files *</h2>
       <div class="picker" style="grid-template-columns:1fr">
-        <div><input type="radio" id="s-bb" name="storage" value="org" required>
+        <div id="s-org-option"><input type="radio" id="s-bb" name="storage" value="org" required>
           <label class="opt" for="s-bb"><b data-storage-label>Company storage</b>
             <span data-storage-note>Shared bucket, your own folder inside it.</span></label></div>
         <div><input type="radio" id="s-own" name="storage" value="own">
@@ -239,42 +241,63 @@
 
 </div>
 <script>
-  // One config file at the repo root adapts this template to any team.
-  fetch('/config.json').then(r => r.json()).then(cfg => {
-    const put = (sel, val) => { if (val) document.querySelectorAll(sel).forEach(e => e.textContent = val); };
-    put('[data-org]', cfg.org_name);
-    put('[data-admin]', cfg.admin_contact);
-    put('[data-storage-label]', cfg.storage && cfg.storage.label);
-    put('[data-storage-note]', cfg.storage && cfg.storage.note);
-    if (cfg.admin_contact) {
-      const h = document.querySelector('#storage-keys-hint');
-      if (h) h.textContent = `Ask ${cfg.admin_contact} for the keys, or use any S3-compatible service of your own.`;
-    }
-  }).catch(() => { /* generic wording already in the markup */ });
-
-  // Show only the follow-up fields the chosen route actually needs.
   const $ = (s) => document.querySelector(s);
   const gitExtra = $('#git-extra'), storExtra = $('#storage-extra'), ownBuckets = $('#own-buckets');
+  let CFG = {};
 
   function refresh() {
     const backup = document.querySelector('input[name=backup]:checked')?.value;
     const storage = document.querySelector('input[name=storage]:checked')?.value;
     const affil = document.querySelector('input[name=affiliation]:checked')?.value;
+    const hasOrg = Boolean(CFG.org_name);
+    const orgKeysKnown = Boolean(CFG.storage && CFG.storage.credentials_provided);
 
     gitExtra.classList.toggle('hidden', backup !== 'github');
-    storExtra.classList.toggle('hidden', storage === 'none' || !storage);
-    // Big Bongo's bucket and public URL are known — don't make people retype them.
+    // When the org overlay carries credentials there is nothing to type in.
+    const needKeys = storage === 'own' || (storage === 'org' && !orgKeysKnown);
+    storExtra.classList.toggle('hidden', !needKeys);
     ownBuckets.classList.toggle('hidden', storage !== 'own');
 
-    // Big Bongo storage needs a company account. Disable rather than scold.
+    // Company storage needs a company account. Disable rather than scold.
     const bb = $('#s-bb'), bbLabel = document.querySelector('label[for=s-bb]');
-    const blocked = affil === 'independent';
+    const blocked = hasOrg && affil === 'independent';
     bb.disabled = blocked;
     bbLabel.style.opacity = blocked ? '.45' : '';
     bbLabel.style.cursor = blocked ? 'not-allowed' : '';
     $('#bb-storage-note').classList.toggle('hidden', !blocked);
     if (blocked && bb.checked) { bb.checked = false; storExtra.classList.add('hidden'); }
   }
+
+  // The form adapts to whichever config is present. With no org overlay it
+  // never mentions a company at all — that's the standalone experience.
+  fetch('/config.json').then(r => r.json()).then(cfg => {
+    CFG = cfg || {};
+    const put = (sel, val) => { if (val) document.querySelectorAll(sel).forEach(e => e.textContent = val); };
+    const st = CFG.storage || {};
+
+    put('[data-org]', CFG.org_name);
+    put('[data-admin]', CFG.admin_contact);
+    put('[data-storage-label]', st.label || (CFG.org_name ? CFG.org_name + ' storage' : null));
+    put('[data-storage-note]', st.note);
+
+    const hasOrg = Boolean(CFG.org_name);
+    $('#affiliation-section').classList.toggle('hidden', !hasOrg);
+    $('#s-org-option').classList.toggle('hidden', !hasOrg);
+    if (!hasOrg) {
+      $('#a-ind').checked = true;   // independent by definition
+      $('#a-bb').required = false;
+      $('#s-bb').required = false;
+    }
+    if (st.credentials_provided) {
+      const h = $('#storage-keys-hint');
+      if (h) h.textContent = 'Already configured — nothing to enter.';
+    } else if (CFG.admin_contact) {
+      const h = $('#storage-keys-hint');
+      if (h) h.textContent = `Ask ${CFG.admin_contact} for the keys, or use any S3-compatible service of your own.`;
+    }
+    refresh();
+  }).catch(() => { /* generic wording already in the markup */ });
+
   document.querySelectorAll('input[name=backup],input[name=storage],input[name=affiliation]')
     .forEach(el => el.addEventListener('change', refresh));
   refresh();

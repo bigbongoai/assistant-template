@@ -28,3 +28,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Ask AI per-page thread databases — local state, one per HTML deliverable
+*.askai.sqlite3
+*.askai.sqlite3-wal
+*.askai.sqlite3-shm

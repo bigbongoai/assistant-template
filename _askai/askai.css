@@ -1,0 +1,285 @@
+/* Ask AI - injected into every spec explainer by specs/_askai/server.py.
+   Self-sufficient on purpose: spec pages define their own palettes (or none),
+   so nothing here inherits from the host page. Values mirror the product's
+   static/css/tokens.css so the drawer looks like BigBongo on any page. */
+
+:root{
+  --askai-surface:#161b24;
+  --askai-panel:#1b212c;
+  --askai-panel-2:#1e2530;
+  --askai-border:#232a35;
+  --askai-border-strong:#2f3742;
+  --askai-copy:#e7eaf0;
+  --askai-muted:#c2cad6;
+  --askai-subtle:#8b94a3;
+  --askai-primary:#6d5cf0;
+  --askai-primary-hover:#7e6ff5;
+  --askai-error:#ef4444;
+  --askai-success:#22c55e;
+  --askai-warning:#eab308;
+  --askai-sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --askai-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --askai-w:420px;
+  --askai-crumb-h:44px;
+}
+
+/* ---------- page shift: push content aside, never cover it ---------- */
+/* The top bar is fixed, so the page is pushed down from <html>. Padding on <html>
+   sits outside any padding an explainer sets on <body>, so no page's own spacing
+   is clobbered. (Two explainers pin html/body to height:100%; there the bar adds
+   its own height to the scroll range - cosmetic, nothing is hidden.) */
+html{
+  padding-top:var(--askai-crumb-h);
+  /* Anchor jumps (and a hash restored on load) would otherwise land the heading
+     under the fixed bar. This covers the specs' own TOC links too. */
+  scroll-padding-top:calc(var(--askai-crumb-h) + 12px);
+}
+body{ transition:margin-right .28s cubic-bezier(.4,0,.2,1) }
+body.askai-open{ margin-right:var(--askai-w) }
+
+/* ---------- floating trigger ---------- */
+#askai-btn{
+  position:fixed; z-index:2147483000; display:none; align-items:center; gap:6px;
+  background:var(--askai-primary); color:#fff; border:none; border-radius:8px;
+  cursor:pointer; font-family:var(--askai-mono); font-size:11px; letter-spacing:.06em;
+  padding:8px 12px; box-shadow:0 6px 20px rgba(0,0,0,.4);
+}
+#askai-btn.on{ display:flex }
+#askai-btn:hover{ background:var(--askai-primary-hover) }
+
+/* ---------- persistent launcher (top-right, always available) ---------- */
+/* Rides beside the drawer instead of hiding under it, so it doubles as a close
+   control once the conversation is open. */
+#askai-launch{
+  position:fixed; top:5px; right:14px; z-index:2147483001;
+  width:34px; height:34px; display:grid; place-items:center;
+  background:var(--askai-surface); border:1px solid var(--askai-border-strong);
+  border-radius:9px; cursor:pointer; color:var(--askai-primary);
+  box-shadow:0 4px 14px rgba(0,0,0,.28);
+  transition:right .28s cubic-bezier(.4,0,.2,1), border-color .15s, color .15s;
+}
+#askai-launch svg{ width:17px; height:17px; fill:currentColor }
+#askai-launch:hover{ border-color:var(--askai-primary); color:var(--askai-primary-hover) }
+body.askai-open #askai-launch{ right:calc(var(--askai-w) + 14px) }
+body.askai-resizing #askai-launch{ transition:none }
+
+/* ---------- top bar: one home breadcrumb for every explainer ---------- */
+/* Explainers have wildly different layouts - sticky sidebars, centered reports,
+   bare presentations - and only 12 of 50 carry any branding of their own. So the
+   way out is injected here rather than expected from the page. */
+#askai-crumb{
+  position:fixed; top:0; left:0; right:0; height:var(--askai-crumb-h);
+  z-index:2147483000; box-sizing:border-box;
+  display:flex; align-items:center; gap:9px; padding:0 60px 0 14px;
+  background:var(--askai-surface); border-bottom:1px solid var(--askai-border);
+  font-family:var(--askai-sans); font-size:12.5px; line-height:1;
+  color:var(--askai-muted);
+  transition:right .28s cubic-bezier(.4,0,.2,1);
+}
+body.askai-open #askai-crumb{ right:var(--askai-w) }
+body.askai-resizing #askai-crumb{ transition:none }
+
+#askai-crumb .home{
+  display:inline-flex; align-items:center; gap:7px; flex:none;
+  padding:6px 10px; border-radius:8px; text-decoration:none;
+  color:var(--askai-copy); background:var(--askai-panel);
+  border:1px solid var(--askai-border-strong);
+  transition:border-color .15s, color .15s, background .15s;
+}
+#askai-crumb .home:hover{
+  border-color:var(--askai-primary); color:#fff; background:var(--askai-panel-2);
+}
+#askai-crumb .home svg{
+  width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2;
+  stroke-linecap:round; stroke-linejoin:round;
+}
+#askai-crumb .sep{ color:var(--askai-subtle); flex:none }
+#askai-crumb .num{ font-family:var(--askai-mono); color:var(--askai-primary); flex:none }
+/* The spec's state, worded exactly as the index words it. */
+#askai-crumb .st{
+  flex:none; font-family:var(--askai-mono); font-size:9.5px; letter-spacing:.05em;
+  text-transform:uppercase; padding:3px 7px; border-radius:999px;
+  border:1px solid transparent;
+}
+#askai-crumb .st-info{
+  color:var(--askai-primary); text-transform:none; letter-spacing:.02em;
+  background:color-mix(in srgb, var(--askai-primary) 14%, transparent);
+  border-color:color-mix(in srgb, var(--askai-primary) 30%, transparent);
+}
+#askai-crumb .sub{
+  flex:none; color:var(--askai-subtle); min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#askai-crumb .title{
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* ---------- highlights (live inside the host page's own content) ---------- */
+mark.askai-hl{
+  background:color-mix(in srgb, #6d5cf0 24%, transparent); color:inherit;
+  box-shadow:inset 0 -1.5px 0 color-mix(in srgb, #6d5cf0 72%, transparent);
+  border-radius:2px; cursor:pointer; transition:background .12s;
+}
+mark.askai-hl.active{ background:color-mix(in srgb, #6d5cf0 40%, transparent) }
+
+/* ---------- tooltip ---------- */
+#askai-tip{
+  position:fixed; z-index:2147483001; display:none; width:310px;
+  background:var(--askai-surface); border:1px solid var(--askai-border-strong);
+  border-radius:10px; padding:12px 14px; box-shadow:0 12px 34px rgba(0,0,0,.45);
+  font-family:var(--askai-sans); font-size:12.5px; line-height:1.55; color:var(--askai-copy);
+}
+#askai-tip.on{ display:block }
+#askai-tip .meta{ font-family:var(--askai-mono); font-size:10px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--askai-subtle); margin-bottom:7px }
+#askai-tip .q{ font-weight:600; margin-bottom:5px }
+#askai-tip .a{ color:var(--askai-muted); display:-webkit-box; -webkit-line-clamp:4;
+  line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; margin-bottom:10px }
+#askai-tip .acts{ display:flex; gap:8px }
+#askai-tip button{ font-family:var(--askai-mono); font-size:10.5px; padding:5px 9px;
+  border-radius:6px; cursor:pointer; border:1px solid var(--askai-border-strong);
+  background:var(--askai-panel-2); color:var(--askai-muted) }
+#askai-tip button.p{ background:var(--askai-primary); border-color:var(--askai-primary); color:#fff }
+
+/* ---------- drawer (chat-interface-standard) ---------- */
+#askai-root{ font-family:var(--askai-sans) }
+#askai-drawer{
+  position:fixed; top:0; right:0; bottom:0; width:var(--askai-w); z-index:2147482000;
+  background:var(--askai-surface); border-left:1px solid var(--askai-border);
+  display:flex; flex-direction:column; color:var(--askai-copy); font-size:15px;
+  transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1);
+}
+body.askai-open #askai-drawer{ transform:translateX(0) }
+
+/* ---------- drag-to-resize divider ---------- */
+/* Sits on the drawer's own left edge, so it moves with the panel and needs no
+   second element in the page's layout. */
+#askai-grip{
+  position:absolute; left:-3px; top:0; bottom:0; width:7px; z-index:1;
+  cursor:col-resize; touch-action:none;
+}
+#askai-grip::after{
+  content:""; position:absolute; left:3px; top:0; bottom:0; width:1px;
+  background:transparent; transition:background .15s;
+}
+#askai-grip:hover::after{ background:var(--askai-primary) }
+body.askai-resizing #askai-grip::after{ background:var(--askai-primary) }
+/* Transitions belong to the open/close slide; during a drag they trail the pointer. */
+body.askai-resizing, body.askai-resizing #askai-drawer{ transition:none !important }
+body.askai-resizing{ user-select:none }
+
+#askai-drawer .head{ flex:none; display:flex; align-items:center; gap:8px;
+  padding:14px 16px; border-bottom:1px solid var(--askai-border) }
+#askai-drawer .head .t{ flex:1; font-family:var(--askai-mono); font-size:11px;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--askai-subtle);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+#askai-drawer .head button{ background:var(--askai-panel-2); border:1px solid var(--askai-border);
+  color:var(--askai-muted); font-family:var(--askai-mono); font-size:10.5px;
+  padding:5px 9px; border-radius:6px; cursor:pointer }
+#askai-drawer .head button:hover{ color:var(--askai-copy); border-color:var(--askai-border-strong) }
+
+#askai-drawer .quote{ flex:none; display:none; margin:12px 16px 0; padding:10px 12px;
+  border-left:2px solid var(--askai-primary); background:var(--askai-panel);
+  border-radius:0 8px 8px 0; font-size:12.5px; color:var(--askai-muted);
+  max-height:104px; overflow:auto }
+#askai-drawer .quote.on{ display:block }
+
+#askai-msgs{ flex:1 1 auto; overflow-y:auto; padding:16px; display:flex;
+  flex-direction:column; gap:14px }
+#askai-msgs .msg{ font-size:13.5px; line-height:1.6 }
+#askai-msgs .msg.user{ align-self:flex-end; max-width:88%; padding:9px 13px;
+  background:color-mix(in srgb, #6d5cf0 18%, transparent);
+  border:1px solid color-mix(in srgb, #6d5cf0 34%, transparent);
+  border-radius:12px 12px 3px 12px; color:var(--askai-copy); white-space:pre-wrap }
+#askai-msgs .msg.ai{ color:var(--askai-muted) }
+#askai-msgs .msg.ai > :first-child{ margin-top:0 }
+#askai-msgs .msg.ai h1,#askai-msgs .msg.ai h2,#askai-msgs .msg.ai h3{
+  font-size:14px; margin:14px 0 6px; color:var(--askai-copy); font-weight:640 }
+#askai-msgs .msg.ai p{ margin:0 0 10px }
+#askai-msgs .msg.ai ul,#askai-msgs .msg.ai ol{ margin:0 0 10px; padding-left:20px }
+#askai-msgs .msg.ai li{ margin-bottom:4px }
+#askai-msgs .msg.ai code{ font-family:var(--askai-mono); font-size:.87em;
+  background:var(--askai-panel-2); border:1px solid var(--askai-border);
+  padding:1px 5px; border-radius:5px; color:var(--askai-copy) }
+#askai-msgs .msg.ai pre{ background:var(--askai-panel-2); border:1px solid var(--askai-border);
+  border-radius:8px; padding:10px 12px; overflow-x:auto; margin:0 0 10px }
+#askai-msgs .msg.ai pre code{ background:none; border:none; padding:0; font-size:11.5px }
+#askai-msgs .msg.ai table{ border-collapse:collapse; width:100%; font-size:12px; margin:0 0 10px }
+#askai-msgs .msg.ai th,#askai-msgs .msg.ai td{ border:1px solid var(--askai-border);
+  padding:6px 9px; text-align:left; vertical-align:top }
+#askai-msgs .msg.ai th{ font-family:var(--askai-mono); font-size:10px;
+  letter-spacing:.1em; text-transform:uppercase; color:var(--askai-subtle); font-weight:400 }
+#askai-msgs .msg.ai blockquote{ margin:0 0 10px; padding-left:12px;
+  border-left:2px solid var(--askai-border-strong); color:var(--askai-subtle) }
+#askai-msgs .msg.ai a{ color:var(--askai-primary-hover) }
+#askai-msgs .msg.err{ color:var(--askai-error) }
+
+#askai-msgs .tool{ border:1px solid var(--askai-border); border-radius:8px;
+  background:var(--askai-panel); font-size:12px }
+#askai-msgs .tool summary{ cursor:pointer; padding:7px 11px; list-style:none;
+  font-family:var(--askai-mono); font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--askai-subtle) }
+#askai-msgs .tool summary::-webkit-details-marker{ display:none }
+#askai-msgs .tool summary::before{ content:"\25B8 "; color:var(--askai-primary) }
+#askai-msgs .tool[open] summary::before{ content:"\25BE " }
+#askai-msgs .tool .body{ padding:0 11px 9px; color:var(--askai-muted);
+  font-family:var(--askai-mono); font-size:11px; word-break:break-word }
+
+#askai-msgs .dots{ display:flex; gap:4px; padding:4px 0 }
+#askai-msgs .dots i{ width:6px; height:6px; border-radius:50%;
+  background:var(--askai-subtle); animation:askai-b 1.2s infinite }
+#askai-msgs .dots i:nth-child(2){ animation-delay:.15s }
+#askai-msgs .dots i:nth-child(3){ animation-delay:.3s }
+@keyframes askai-b{ 0%,60%,100%{opacity:.25;transform:translateY(0)}
+  30%{opacity:1;transform:translateY(-3px)} }
+
+#askai-msgs .histbtn{ display:block; width:100%; text-align:left; margin-bottom:6px;
+  padding:8px 10px; border-radius:8px; border:1px solid var(--askai-border);
+  background:var(--askai-panel); color:var(--askai-muted); font-size:12.5px;
+  font-family:inherit; cursor:pointer }
+#askai-msgs .histbtn:hover{ border-color:var(--askai-border-strong); color:var(--askai-copy) }
+
+/* unified two-line composer */
+#askai-composer{ flex:none; margin:0 16px 8px; border:1px solid var(--askai-border);
+  background:var(--askai-panel); border-radius:12px; cursor:text;
+  transition:border-color .15s }
+#askai-composer:focus-within{ border-color:color-mix(in srgb, #6d5cf0 60%, transparent) }
+#askai-input{ display:block; width:100%; border:none; background:none; resize:none;
+  outline:none; color:var(--askai-copy); font-family:var(--askai-sans);
+  font-size:13.5px; line-height:1.5; padding:11px 13px 4px; max-height:330px;
+  overflow-y:auto }
+#askai-input::placeholder{ color:var(--askai-subtle) }
+#askai-bar{ display:flex; align-items:center; gap:5px; padding:5px 8px 7px }
+#askai-bar button{ width:27px; height:27px; display:flex; align-items:center;
+  justify-content:center; background:none; border:none; border-radius:6px;
+  color:var(--askai-subtle); cursor:pointer; padding:0 }
+#askai-bar button:hover:not(:disabled){ background:var(--askai-panel-2); color:var(--askai-copy) }
+#askai-bar button:disabled{ opacity:.34; cursor:not-allowed }
+#askai-bar svg{ width:15px; height:15px; fill:none; stroke:currentColor;
+  stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round }
+#askai-bar select{ background:none; border:none; color:var(--askai-subtle);
+  font-family:var(--askai-mono); font-size:10.5px; cursor:pointer; outline:none }
+#askai-bar .sp{ flex:1 }
+#askai-bar .send{ width:29px; height:29px; background:var(--askai-primary); color:#fff }
+#askai-bar .send:hover:not(:disabled){ background:var(--askai-primary-hover); color:#fff }
+#askai-bar .send:disabled{ background:var(--askai-panel-2); color:var(--askai-subtle) }
+
+#askai-note{ flex:none; padding:0 16px 12px; font-family:var(--askai-mono);
+  font-size:10.5px; color:var(--askai-subtle) }
+
+@media (max-width:900px){
+  body.askai-open{ margin-right:0 }
+  #askai-drawer{ width:100% }
+  /* The drawer covers the viewport, so the launcher would sit on top of it. */
+  body.askai-open #askai-launch{ display:none }
+  /* Full-width drawer has no divider to drag, and the grip would sit over content. */
+  #askai-grip{ display:none }
+  /* Narrow screens keep the escape hatch; the spec title is the first thing to go. */
+  #askai-crumb .title, #askai-crumb .sep, #askai-crumb .st, #askai-crumb .sub{ display:none }
+  body.askai-open #askai-crumb{ right:0 }
+}
+
+@media print{
+  #askai-crumb{ display:none }
+  html{ padding-top:0 }
+}

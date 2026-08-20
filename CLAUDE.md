@@ -141,6 +141,27 @@ A `share` link works for anyone holding it, with no login, until it expires. Use
 
 `examples/` holds two worked tasks showing the folder conventions end to end. Read them when unsure of the layout. Never write new work there — it is reference material shared across the team. New work always goes in `tasks/`.
 
+## Ask AI on deliverables
+
+Every HTML deliverable becomes interactive when served by the workspace's one Ask AI proxy:
+
+```bash
+python3 _askai/server.py        # then open http://127.0.0.1:8770/
+```
+
+It indexes every page under `tasks/` (plus `archive/` and `examples/`), injects the Ask AI bundle
+at serve time, and keeps threads in a SQLite file next to each page. Pages carry nothing, so a new
+deliverable gets the feature simply by existing.
+
+- **Never add a per-task Ask AI server.** One proxy serves the whole workspace; copies drift and
+  fight over ports.
+- The model is given the rendered page plus the `.md` notes from the step folder and the task
+  folder, read fresh on each request.
+- Needs `ANTHROPIC_API_KEY` in the workspace root `.env`. Without it pages still render and old
+  threads still load; only asking fails.
+- Thread databases (`*.askai.sqlite3`) are gitignored local state.
+- Opening a deliverable straight from disk still works, just without the drawer.
+
 ## Handling blocked sites (403 / anti-scraping)
 
 When a site returns 403 or otherwise blocks a plain fetch, collect the URLs into a list and use Playwright to launch a real browser, load them, and extract the content from the rendered page.

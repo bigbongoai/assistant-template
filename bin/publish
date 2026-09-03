@@ -6,7 +6,7 @@ disk it is just a page; served by the local Ask AI proxy it gains a chat drawer
 you can select text in and ask about. `bin/r2 share` can hand someone the file,
 but the drawer stops working, because the drawer needs a server.
 
-This sends the page to ccfor.me instead, which serves it and runs the drawer
+This sends the page to briefings.page instead, which serves it and runs the drawer
 there. The result is a link you can send to anyone.
 
     ./bin/publish tasks/19.pricing/19-01.research/index.html
@@ -40,9 +40,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
 
-DEFAULT_HOST = "https://ccfor.me"
-TOKEN_KEY = "CCFORME_TOKEN"
-HOST_KEY = "CCFORME_HOST"
+DEFAULT_HOST = "https://briefings.page"
+TOKEN_KEY = "BRIEFINGS_TOKEN"
+HOST_KEY = "BRIEFINGS_HOST"
 
 # Notes shipped with the page, so the drawer answers as well online as it does
 # locally. Same two layers the local proxy reads: the step folder, then the
@@ -97,7 +97,7 @@ def write_env_value(key, value):
     if not replaced:
         if out and out[-1].strip():
             out.append("")
-        out.append("# Publishing to ccfor.me. Written by ./bin/publish - do not share.")
+        out.append("# Publishing to briefings.page. Written by ./bin/publish - do not share.")
         out.append(f'{key}="{value}"')
     ENV.write_text("\n".join(out) + "\n", encoding="utf-8")
     ENV.chmod(0o600)
@@ -342,7 +342,7 @@ def cmd_publish(arg):
               file=sys.stderr)
         raise SystemExit(2)
     if status == 401:
-        die("this workspace's credential was refused. Remove CCFORME_TOKEN "
+        die("this workspace's credential was refused. Remove BRIEFINGS_TOKEN "
             "from .env and run it again to sign in.")
     die(body.get("detail") or body.get("error") or f"failed with status {status}")
 

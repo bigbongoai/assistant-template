@@ -58,7 +58,7 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 
    **`storage: none`** — leave the R2 fields empty. `bin/r2` already explains itself if called. Don't offer uploads in later sessions unless they ask.
 
-   **`publish: ccforme`** - nothing to configure now. Do NOT run `./bin/publish` during setup: the account is created on first use, and making someone sign up before they have anything to share is the wrong order. Just record the choice, and when they later finish a deliverable and want to send it to someone, run `./bin/publish <the step's index.html>` and hand back the link. The first run opens a browser and walks them through it.
+   **`publish: briefings`** - nothing to configure now. Do NOT run `./bin/publish` during setup: the account is created on first use, and making someone sign up before they have anything to share is the wrong order. Just record the choice, and when they later finish a deliverable and want to send it to someone, run `./bin/publish <the step's index.html>` and hand back the link. The first run opens a browser and walks them through it.
 
    **`publish: none`** - record it and do not bring it up again unless they ask. Sharing a file still works through `./bin/r2 share`, without the Ask AI drawer.
 
@@ -145,7 +145,7 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
 - **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.).
 
-## Publishing a page (ccfor.me)
+## Publishing a page (briefings.page)
 
 `./bin/r2 share` hands someone a file. `./bin/publish` puts the page *online*, and
 that difference matters: a published page keeps its Ask AI drawer, so whoever you

@@ -322,11 +322,19 @@ def cmd_publish(arg):
 
     if status in (200, 201):
         print(f"\n  {body['url']}\n")
-        print("Updated." if body.get("updated") else "Live.", end=" ")
-        print(f"Using {body['live_pages']} of {body['max_live_pages']} pages.")
+        if body.get("pending"):
+            # The address is final but not resolving yet. Say so plainly rather
+            # than hand over a link that looks fine and does not open.
+            print(body.get("pending_detail")
+                  or "Saved, but the address is not resolving yet. Try it shortly.")
+        else:
+            print("Updated." if body.get("updated") else "Live.", end=" ")
+            print(f"Using {body['live_pages']} of {body['max_live_pages']} pages.")
         if notes:
             print(f"Ask AI is grounded in {len(notes)} note file(s) from this task.")
         return
+    if status == 409 and body.get("error") == "no_handle":
+        die(body.get("detail") or "this account has no publishing address yet")
     if status == 402:
         # The only place money is ever mentioned.
         print(f"\n{body.get('detail')}", file=sys.stderr)

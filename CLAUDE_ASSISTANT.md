@@ -40,7 +40,7 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    - Press `shift`+`tab` until **⏵⏵ auto mode on** shows in yellow at the bottom of the terminal — otherwise they'll be approving every step by hand.
    - Open the URL and fill in the form.
 3. **Wait for `setup/answers.json` to appear.** Poll every few seconds. Don't fill the screen with status chatter while waiting.
-4. **Apply the answers.** The form returns three routing fields — `affiliation`, `backup`, `storage` — and each is independent. Handle every combination:
+4. **Apply the answers.** The form returns four routing fields - `affiliation`, `backup`, `storage`, `publish` - and each is independent. Handle every combination:
 
    **Always:** write `_personal.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
 
@@ -57,6 +57,10 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    **`storage: own`** — write their endpoint, bucket and keys. If they gave no public URL, leave `R2_PUBLIC_BASE` empty; `r2 share` will refuse rather than print a dead link.
 
    **`storage: none`** — leave the R2 fields empty. `bin/r2` already explains itself if called. Don't offer uploads in later sessions unless they ask.
+
+   **`publish: ccforme`** - nothing to configure now. Do NOT run `./bin/publish` during setup: the account is created on first use, and making someone sign up before they have anything to share is the wrong order. Just record the choice, and when they later finish a deliverable and want to send it to someone, run `./bin/publish <the step's index.html>` and hand back the link. The first run opens a browser and walks them through it.
+
+   **`publish: none`** - record it and do not bring it up again unless they ask. Sharing a file still works through `./bin/r2 share`, without the Ask AI drawer.
 
    **Never echo a key** into the chat, a task file, or a commit.
 
@@ -140,6 +144,38 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 - **Every task ships a visual explainer, built with the `bb-visual-explainer` skill.** That is the default deliverable, not something to wait to be asked for. Invoke the skill before writing the page rather than hand-rolling a layout, and do not reach for a Tailwind CDN - it breaks the skill's zero-network-requests rule. Each step gets its own `index.html`; if the user asks for another round of info, create a new step folder with the next number and a new `index.html` rather than overwriting the previous one. Pair it with the Ask AI skill, which in this workspace is served by the shared proxy, so the page itself carries nothing.
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
 - **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.).
+
+## Publishing a page (ccfor.me)
+
+`./bin/r2 share` hands someone a file. `./bin/publish` puts the page *online*, and
+that difference matters: a published page keeps its Ask AI drawer, so whoever you
+send it to can select any passage and ask about it. A shared file cannot - the
+drawer needs a server, and once the file leaves this machine the local proxy is
+no longer in the loop.
+
+```bash
+./bin/publish tasks/19.pricing/19-01.research/index.html   # publish or update
+./bin/publish list                                         # what is online
+./bin/publish rm <id>                                      # take one down
+```
+
+- **The first run signs them up.** A browser opens, they type an email, click the
+  link it sends, and approve. There is no password and nothing to copy - the
+  credential arrives over `bin/publish`'s own connection and is written to `.env`.
+  Never print it, and never ask them to paste one.
+- **Re-publishing the same step updates the same URL.** The link you already gave
+  someone keeps working. A new step folder gets its own link.
+- **The free plan limits how many pages are live at once**, not how long they stay
+  up. If `publish` reports the limit is reached, show them `./bin/publish list` and
+  offer to take an old page down. That is the only time to mention money.
+- **The notes go with the page.** `bin/publish` sends the `.md` files from the step
+  folder and the task folder, which is what the drawer is grounded in - the same
+  two layers the local proxy reads. Anything in those files is readable by anyone
+  who opens the page.
+- **Published pages are public.** Anyone with the link can read the page and its
+  notes. Never publish client material, credentials, or personal data. Ask first
+  if there is any doubt.
+- If the workspace chose `publish: none` at setup, don't offer this.
 
 ## Large files and sharing (R2)
 

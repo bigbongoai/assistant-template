@@ -79,6 +79,17 @@ body.askai-resizing #askai-launch{ transition:none }
 body.askai-open #askai-crumb{ right:var(--askai-w) }
 body.askai-resizing #askai-crumb{ transition:none }
 
+/* A published page is somebody else's HTML, and it may well style .sub, .num
+   or .title for its own purposes. Those generic names would otherwise bleed
+   into this bar - a host page's ".sub{margin:0 0 2.5rem}" shunts the step
+   label clean out of it. Reset every child first; the rules below are more
+   specific, so they still win. */
+#askai-crumb > *{
+  margin:0; padding:0; border:0; background:none; font:inherit; color:inherit;
+  text-transform:none; letter-spacing:normal; text-indent:0; float:none;
+  position:static; box-shadow:none; max-width:none; min-height:0;
+}
+
 #askai-crumb .home{
   display:inline-flex; align-items:center; gap:7px; flex:none;
   padding:6px 10px; border-radius:8px; text-decoration:none;

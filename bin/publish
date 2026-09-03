@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""publish - put a deliverable online, with its Ask AI drawer still working.
+
+A deliverable in this workspace is one self-contained HTML file. Opened from
+disk it is just a page; served by the local Ask AI proxy it gains a chat drawer
+you can select text in and ask about. `bin/r2 share` can hand someone the file,
+but the drawer stops working, because the drawer needs a server.
+
+This sends the page to ccfor.me instead, which serves it and runs the drawer
+there. The result is a link you can send to anyone.
+
+    ./bin/publish tasks/19.pricing/19-01.research/index.html
+    ./bin/publish list
+    ./bin/publish rm <id>
+    ./bin/publish whoami
+
+The first time, a browser window opens and asks for an email address. There is
+no password and nothing to copy: you approve it in the browser, and this script
+collects the credential over its own connection and writes it to .env. The
+token is never printed, and never travels through the browser.
+
+Standard library only, like _askai/server.py. No install step.
+"""
+import http.server
+import json
+import os
+import secrets
+import socket
+import socketserver
+import ssl
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import webbrowser
+from html import unescape
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+ENV = ROOT / ".env"
+
+DEFAULT_HOST = "https://ccfor.me"
+TOKEN_KEY = "CCFORME_TOKEN"
+HOST_KEY = "CCFORME_HOST"
+
+# Notes shipped with the page, so the drawer answers as well online as it does
+# locally. Same two layers the local proxy reads: the step folder, then the
+# task folder.
+MAX_NOTES = 40
+
+
+def die(msg, code=1):
+    print(f"publish: {msg}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+# ----------------------------------------------------------------------- .env
+
+
+def read_env():
+    """KEY=VALUE pairs from .env. Values may be quoted, as bin/r2 writes them."""
+    values = {}
+    if not ENV.exists():
+        return values
+    for raw in ENV.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def write_env_value(key, value):
+    """Set one key in .env, leaving every other line untouched.
+
+    Never printed, and the file is left readable only by its owner.
+    """
+    lines = []
+    if ENV.exists():
+        lines = ENV.read_text(encoding="utf-8", errors="replace").splitlines()
+    out, replaced = [], False
+    for line in lines:
+        stripped = line.strip()
+        name = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
+        if name.startswith("export "):
+            name = name[7:].strip()
+        if name == key and not stripped.startswith("#"):
+            out.append(f'{key}="{value}"')
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        if out and out[-1].strip():
+            out.append("")
+        out.append("# Publishing to ccfor.me. Written by ./bin/publish - do not share.")
+        out.append(f'{key}="{value}"')
+    ENV.write_text("\n".join(out) + "\n", encoding="utf-8")
+    ENV.chmod(0o600)
+
+
+def host():
+    return (read_env().get(HOST_KEY) or os.environ.get(HOST_KEY)
+            or DEFAULT_HOST).rstrip("/")
+
+
+# ------------------------------------------------------------------- http
+
+
+def api(path, payload=None, token=None, method=None, timeout=60):
+    """One JSON call. Returns (status, parsed-body)."""
+    url = f"{host()}{path}"
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(
+        url, data=data, headers=headers,
+        method=method or ("POST" if data is not None else "GET"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        try:
+            return exc.code, json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return exc.code, {"error": "http_error", "detail": body[:300]}
+    except (urllib.error.URLError, ssl.SSLError, TimeoutError) as exc:
+        die(f"could not reach {host()} ({exc}). Are you online?")
+
+
+# ------------------------------------------------------- signing in (once)
+
+
+class _Callback(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+    approved = threading.Event()
+
+
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.server.approved.set()
+        body = (
+            b"<!doctype html><meta charset=utf-8>"
+            b"<title>Done</title>"
+            b"<body style='font:16px system-ui;padding:3rem;text-align:center'>"
+            b"<h1>All set</h1><p>You can close this tab and go back to your assistant.</p>"
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass  # keep the terminal readable
+
+
+def sign_in():
+    """Device authorization: approve in a browser, collect the token here.
+
+    The browser only ever carries a public request id. The token itself comes
+    back over this script's own HTTPS connection, so it never appears in a URL,
+    a history entry, or on screen.
+    """
+    server = _Callback(("127.0.0.1", 0), _CallbackHandler)
+    port = server.server_address[1]
+    state = secrets.token_urlsafe(16)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    status, body = api("/api/publish/auth/start", {
+        "redirect_uri": f"http://127.0.0.1:{port}/callback",
+        "state": state,
+        "name": socket.gethostname(),
+    })
+    if status != 200:
+        die(f"could not start sign-in: {body.get('detail') or body.get('error')}")
+
+    device_code = body["device_code"]
+    approve_url = body["approve_url"]
+    interval = max(1, int(body.get("interval") or 2))
+    deadline = time.time() + int(body.get("expires_in") or 900)
+
+    print("Opening your browser to finish setting this up.")
+    print("If it does not open, go to:")
+    print(f"  {approve_url}\n")
+    try:
+        webbrowser.open(approve_url)
+    except Exception:
+        pass
+
+    print("Waiting for you to approve it...", flush=True)
+    while time.time() < deadline:
+        server.approved.wait(timeout=interval)
+        status, body = api("/api/publish/auth/token", {"device_code": device_code})
+        if status == 200:
+            server.shutdown()
+            write_env_value(TOKEN_KEY, body["token"])
+            print(f"\nSigned in as {body['email']} ({body.get('plan', 'free')} plan).")
+            print("Saved to .env. You will not have to do this again.")
+            return body["token"]
+        if status == 202:
+            continue
+        server.shutdown()
+        die(f"sign-in failed: {body.get('detail') or body.get('error')}")
+
+    server.shutdown()
+    die("timed out waiting for approval. Run the same command again.")
+
+
+def token_or_sign_in():
+    existing = read_env().get(TOKEN_KEY) or os.environ.get(TOKEN_KEY, "")
+    if existing:
+        return existing
+    print("This workspace has not published anything yet, so let's set that up.\n")
+    return sign_in()
+
+
+# --------------------------------------------------------------- the page
+
+
+def label(path):
+    """The path as written in the workspace, for showing to a person."""
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def describe(path):
+    """Work out the task and step from where the file sits.
+
+    tasks/19.pricing/19-01.research/index.html
+      -> task "19.pricing", step "19-01.research"
+    """
+    try:
+        rel = path.resolve().relative_to(ROOT)
+    except ValueError:
+        return path.stem, ""
+    parts = rel.parts
+    if len(parts) >= 3 and parts[0] in ("tasks", "archive", "examples"):
+        return parts[1], "/".join(parts[2:-1])
+    return (parts[0] if parts else path.stem), "/".join(parts[1:-1])
+
+
+def page_title(html):
+    """The page's own <title>, as text.
+
+    Entities are decoded, so a title written as "Offer &amp; Contract" arrives
+    as "Offer & Contract" rather than showing the raw entity to a reader.
+    """
+    lowered = html.lower()
+    start = lowered.find("<title")
+    if start == -1:
+        return ""
+    start = lowered.find(">", start)
+    end = lowered.find("</title>", start)
+    if start == -1 or end == -1:
+        return ""
+    return " ".join(unescape(html[start + 1:end]).split())[:300]
+
+
+def collect_notes(path):
+    """The .md files beside the page, plus the ones at the top of its task."""
+    folders = [path.parent]
+    task_root = path.parent
+    try:
+        rel = path.resolve().relative_to(ROOT)
+        if len(rel.parts) >= 3 and rel.parts[0] in ("tasks", "archive", "examples"):
+            task_root = ROOT / rel.parts[0] / rel.parts[1]
+    except ValueError:
+        pass
+    if task_root != path.parent:
+        folders.append(task_root)
+
+    notes, seen = [], set()
+    for folder in folders:
+        for md in sorted(folder.glob("*.md")):
+            if md in seen:
+                continue
+            seen.add(md)
+            try:
+                notes.append({
+                    "name": label(md),
+                    "body": md.read_text(encoding="utf-8", errors="replace"),
+                })
+            except OSError:
+                continue
+    return notes[:MAX_NOTES]
+
+
+def cmd_publish(arg):
+    # Resolve up front: everything downstream compares against the workspace
+    # root, and a relative path passed on the command line would not match.
+    path = Path(arg).resolve()
+    if path.is_dir():
+        path = path / "index.html"
+    if not path.is_file():
+        die(f"no such file: {arg}")
+    if path.suffix.lower() != ".html":
+        die("publish takes an .html file (the deliverable itself)")
+
+    html = path.read_text(encoding="utf-8", errors="replace")
+    task, step = describe(path)
+    notes = collect_notes(path)
+
+    token = token_or_sign_in()
+    print(f"\nPublishing {label(path)} ...")
+    status, body = api("/api/publish/pages", {
+        "task": task, "step": step,
+        "title": page_title(html) or path.stem,
+        "html": html, "notes": notes,
+    }, token=token, timeout=120)
+
+    if status in (200, 201):
+        print(f"\n  {body['url']}\n")
+        print("Updated." if body.get("updated") else "Live.", end=" ")
+        print(f"Using {body['live_pages']} of {body['max_live_pages']} pages.")
+        if notes:
+            print(f"Ask AI is grounded in {len(notes)} note file(s) from this task.")
+        return
+    if status == 402:
+        # The only place money is ever mentioned.
+        print(f"\n{body.get('detail')}", file=sys.stderr)
+        print("\nTo free a slot:  ./bin/publish list   then   ./bin/publish rm <id>",
+              file=sys.stderr)
+        raise SystemExit(2)
+    if status == 401:
+        die("this workspace's credential was refused. Remove CCFORME_TOKEN "
+            "from .env and run it again to sign in.")
+    die(body.get("detail") or body.get("error") or f"failed with status {status}")
+
+
+def cmd_list():
+    status, body = api("/api/publish/pages", token=token_or_sign_in())
+    if status != 200:
+        die(body.get("detail") or body.get("error") or "could not list pages")
+    pages = body.get("pages") or []
+    if not pages:
+        print("Nothing published yet.")
+        return
+    for page in pages:
+        mark = "live" if page["live"] else "  - "
+        where = page["task"] + (f" / {page['step']}" if page["step"] else "")
+        print(f"{mark}  {page['slug']:<14}{where}")
+        print(f"        {page['url']}")
+
+
+def cmd_rm(slug):
+    status, body = api(f"/api/publish/pages/{slug}", token=token_or_sign_in(),
+                       method="DELETE")
+    if status != 200:
+        die(body.get("detail") or body.get("error") or "could not take that page down")
+    print(f"{slug} is no longer served. Its slot is free again.")
+
+
+def cmd_whoami():
+    status, body = api("/api/publish/me", token=token_or_sign_in())
+    if status != 200:
+        die(body.get("detail") or body.get("error") or "could not read the account")
+    print(f"{body['email']}  ({body['plan']} plan)")
+    print(f"{body['live_pages']} of {body['max_live_pages']} pages live")
+
+
+USAGE = """publish - put a deliverable online with its Ask AI drawer working
+
+  ./bin/publish <file.html>   publish it, or update it if already published
+  ./bin/publish list          what is online right now
+  ./bin/publish rm <id>       take one down and free its slot
+  ./bin/publish whoami        which account this workspace publishes to
+
+The first run opens a browser to set up an account. Nothing to copy or paste.
+Published pages are public to anyone with the link - never publish client
+material, credentials, or personal data.
+"""
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    command, rest = argv[0], argv[1:]
+    if command == "list":
+        cmd_list()
+    elif command == "whoami":
+        cmd_whoami()
+    elif command == "rm":
+        if not rest:
+            die("which page? Run ./bin/publish list to see the ids.")
+        cmd_rm(rest[0])
+    else:
+        cmd_publish(command)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

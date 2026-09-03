@@ -7,7 +7,9 @@ ask about it, and the passage stays highlighted with its conversation attached.
 python3 _askai/server.py
 ```
 
-Then open <http://127.0.0.1:8770/> for an index of every page in the workspace.
+Then open <http://pa.lcl:1111/> for an index of every page in the workspace.
+`pa.lcl` is a local name for loopback; `setup.sh` tells you how to add it if it is missing,
+and <http://127.0.0.1:1111/> always works without it.
 
 ## Why one server
 

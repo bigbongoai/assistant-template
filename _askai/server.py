@@ -54,7 +54,7 @@ DEFAULT_MODEL = "claude-opus-5"
 MAX_TOKENS = 4096
 HOST = "127.0.0.1"
 # Override with ASKAI_PORT when you keep more than one workspace on a machine.
-PORT = int(os.environ.get("ASKAI_PORT", "8770"))
+PORT = int(os.environ.get("ASKAI_PORT", "1111"))
 
 SYSTEM_PROMPT = (
     "You are answering questions about a piece of work the reader is looking at "

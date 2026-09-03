@@ -54,6 +54,17 @@ fi
 # reconcile. Merge (not rebase) keeps your task commits intact.
 git config pull.rebase false 2>/dev/null || true
 
+# A friendly name for the Ask AI proxy, so deliverables live at pa.lcl:1111
+# instead of a bare loopback address. The server binds to 127.0.0.1, so this is
+# purely a name lookup - nothing is exposed to the network. Needs sudo, so we
+# tell the user rather than doing it for them.
+if grep -qE '^[^#]*[[:space:]]pa\.lcl([[:space:]]|$)' /etc/hosts 2>/dev/null; then
+  printf '  = %-10s pa.lcl already maps to localhost\n' "hosts"
+else
+  printf '  - %-10s pa.lcl not in /etc/hosts. To reach your pages at http://pa.lcl:1111 run:\n' "hosts"
+  printf '                 echo "127.0.0.1 pa.lcl" | sudo tee -a /etc/hosts\n'
+fi
+
 echo
 if grep -q 'SETUP-REQUIRED' _personal.md 2>/dev/null; then
   cat <<'EOF'

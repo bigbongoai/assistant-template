@@ -146,7 +146,7 @@ A `share` link works for anyone holding it, with no login, until it expires. Use
 Every HTML deliverable becomes interactive when served by the workspace's one Ask AI proxy:
 
 ```bash
-python3 _askai/server.py        # then open http://127.0.0.1:8770/
+python3 _askai/server.py        # then open http://pa.lcl:1111/
 ```
 
 It indexes every page under `tasks/` (plus `archive/` and `examples/`), injects the Ask AI bundle

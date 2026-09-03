@@ -239,6 +239,16 @@ body.askai-resizing{ user-select:none }
   font-family:inherit; cursor:pointer }
 #askai-msgs .histbtn:hover{ border-color:var(--askai-border-strong); color:var(--askai-copy) }
 
+/* jump-to-latest: only while autoscroll is paused mid-read */
+#askai-jump{ position:absolute; left:50%; transform:translateX(-50%) translateY(6px);
+  bottom:92px; z-index:2; opacity:0; pointer-events:none;
+  transition:opacity .15s, transform .15s;
+  background:var(--askai-panel-2); border:1px solid var(--askai-border-strong);
+  color:var(--askai-muted); font-family:var(--askai-mono); font-size:10.5px;
+  padding:5px 11px; border-radius:999px; cursor:pointer }
+#askai-jump.on{ opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) }
+#askai-jump:hover{ color:var(--askai-copy); border-color:var(--askai-primary) }
+
 /* unified two-line composer */
 #askai-composer{ flex:none; margin:0 16px 8px; border:1px solid var(--askai-border);
   background:var(--askai-panel); border-radius:12px; cursor:text;

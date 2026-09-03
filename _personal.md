@@ -39,7 +39,9 @@ profiles" in `CLAUDE.md`.
 - Extract content programmatically once the page loads
 
 ## Results Presentation
-- Deliver results as a small HTML site using Tailwind CSS (via CDN)
+- **Every task gets a visual explainer, built with the `bb-visual-explainer` skill** - default, not on request
+- Skill rules that override older habits: self-contained HTML, zero network requests (so no Tailwind CDN), left sidebar
+  where each nav item is its own JS-switched page, dark-primary theme with toggle, print stylesheet, glossary
 - Each step folder gets its own `index.html`
 - Test deliverables with Playwright before presenting — verify links work and images
   render; capture screenshots

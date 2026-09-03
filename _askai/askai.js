@@ -146,6 +146,7 @@ root.innerHTML =
     '</div>' +
     '<div class="quote" id="askai-quote"></div>' +
     '<div id="askai-msgs"></div>' +
+    '<button id="askai-jump" title="Jump to latest">\u2193 Latest</button>' +
     '<div id="askai-composer">' +
       '<textarea id="askai-input" rows="1" placeholder="Ask about the selected text..."></textarea>' +
       '<div id="askai-bar">' +
@@ -177,15 +178,16 @@ var quote  = root.querySelector("#askai-quote");
 var input  = root.querySelector("#askai-input");
 var send   = root.querySelector("#askai-send");
 var note   = root.querySelector("#askai-note");
+var jump   = root.querySelector("#askai-jump");
 
-function open()  { document.body.classList.add("askai-open"); setTimeout(function(){ input.focus(); }, 300); }
+function open()  { document.body.classList.add("askai-open"); placeJump(); setTimeout(function(){ input.focus(); }, 300); }
 function close() { document.body.classList.remove("askai-open"); }
 
 root.querySelector('[data-act="close"]').addEventListener("click", close);
 root.querySelector('[data-act="new"]').addEventListener("click", function () {
   threadId = null; selectedText = "";
   quote.classList.remove("on"); quote.textContent = "";
-  msgs.innerHTML = ""; input.value = ""; size();
+  msgs.innerHTML = ""; pinned = true; syncJump(); input.value = ""; size();
   open();
 });
 root.querySelector('[data-act="history"]').addEventListener("click", showHistory);
@@ -320,7 +322,7 @@ btn.addEventListener("click", function () {
   selectedText = txt;
   quote.textContent = txt;
   quote.classList.add("on");
-  msgs.innerHTML = ""; input.value = ""; size();
+  msgs.innerHTML = ""; pinned = true; syncJump(); input.value = ""; size();
   open();
 });
 
@@ -358,7 +360,28 @@ function tool(name, detail) {
   d.appendChild(s); d.appendChild(b);
   msgs.appendChild(d); down();
 }
-function down() { msgs.scrollTop = msgs.scrollHeight; }
+/* Sticky-bottom autoscroll: follow the stream only while the reader is already
+ * at the bottom. The moment they scroll up to re-read something, stop yanking
+ * them back, and offer one click to re-anchor. */
+var pinned = true;
+function atBottom() { return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40; }
+function syncJump() {
+  var scrollable = msgs.scrollHeight > msgs.clientHeight + 8;
+  placeJump();                       /* the note and composer both change height */
+  jump.classList.toggle("on", !pinned && scrollable);
+}
+function down(force) {
+  if (force || pinned) { msgs.scrollTop = msgs.scrollHeight; pinned = true; }
+  syncJump();
+}
+msgs.addEventListener("scroll", function () { pinned = atBottom(); syncJump(); });
+/* The composer grows with the text, so measure rather than guess the offset. */
+function placeJump() {
+  var composer = root.querySelector("#askai-composer");
+  jump.style.bottom = (composer.offsetHeight + note.offsetHeight + 14) + "px";
+}
+window.addEventListener("resize", function () { placeJump(); pinned = atBottom(); syncJump(); });
+jump.addEventListener("click", function () { down(true); input.focus(); });
 
 /* --------------------------------------------------------------- composer --- */
 
@@ -368,6 +391,7 @@ root.querySelector("#askai-composer").addEventListener("click", function (e) {
 function size() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 15 * 20 + 15) + "px";  /* 15 lines, then scroll */
+  placeJump();
 }
 input.addEventListener("input", size);
 input.addEventListener("keydown", function (e) {
@@ -430,7 +454,7 @@ function ask() {
   var q = input.value.trim();
   if (!q || busy) return;
   busy = true; send.disabled = true;
-  bubble("user", q);
+  bubble("user", q); down(true);
   input.value = ""; size();
 
   var spinner = dots(), target = null, acc = "";
@@ -486,7 +510,7 @@ function ask() {
   }).catch(function () {
     if (spinner) { spinner.remove(); spinner = null; }
     bubble("ai err").innerHTML = md(
-      "**Proxy not reachable.** Start it with `python3 specs/_askai/server.py`.");
+      "**Proxy not reachable.** Start it with `python3 _askai/server.py`.");
   }).then(function () {
     busy = false; send.disabled = false;
     if (spinner) { spinner.remove(); spinner = null; }

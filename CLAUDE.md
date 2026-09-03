@@ -122,7 +122,7 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 
 ## Delivery Rules
 
-- **HTML deliverables with Tailwind.** Display task results as a mini website in HTML using Tailwind CSS (via CDN). Each step gets its own `index.html`. If the user asks for another round of info, create a new step folder with the next number and a new `index.html` — do not overwrite the previous one.
+- **Every task ships a visual explainer, built with the `bb-visual-explainer` skill.** That is the default deliverable, not something to wait to be asked for. Invoke the skill before writing the page rather than hand-rolling a layout, and do not reach for a Tailwind CDN - it breaks the skill's zero-network-requests rule. Each step gets its own `index.html`; if the user asks for another round of info, create a new step folder with the next number and a new `index.html` rather than overwriting the previous one. Pair it with the Ask AI skill, which in this workspace is served by the shared proxy, so the page itself carries nothing.
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
 - **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.).
 

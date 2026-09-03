@@ -53,8 +53,15 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
    **Never echo a key** into the chat, a task file, or a commit.
 
    Then run `./setup.sh` for the mechanical parts (`pull.rebase`, `chmod`).
-5. **Clean up:** stop the server and delete `setup/answers.json` — it holds their secret key.
-6. **Confirm in two or three lines**, then offer to start on whatever they originally asked for.
+5. **The one thing they must type themselves.** Ask AI serves deliverables at `http://pa.lcl:1111`, which needs one line in `/etc/hosts`. `sudo` prompts for their password, so you cannot do this for them - it is the single exception to "never ask them to run a command". Check first with `grep pa.lcl /etc/hosts`; if it is already there, say nothing at all. If it is missing, hand them the line and say what it does in one sentence - a local nickname for this machine, nothing exposed to the network:
+
+   ```sh
+   echo "127.0.0.1 pa.lcl" | sudo tee -a /etc/hosts
+   ```
+
+   If they would rather not, that is fine and costs nothing: `http://127.0.0.1:1111` works either way. Do not press it a second time.
+6. **Clean up:** stop the server and delete `setup/answers.json` — it holds their secret key.
+7. **Confirm in two or three lines**, then offer to start on whatever they originally asked for.
 
 If `python3` isn't available, fall back to asking the same questions conversationally — a few at a time, never all at once — then continue from step 4.
 

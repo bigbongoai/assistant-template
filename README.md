@@ -48,7 +48,7 @@ tasks/
 └── 01.my-task/
     ├── 01-first-round/
     │   ├── notes.md
-    │   └── index.html           ← Tailwind deliverable for this round
+    │   └── index.html           ← visual explainer for this round
     └── 02-followup/
         ├── notes.md
         ├── index.html
@@ -57,7 +57,8 @@ tasks/
 ```
 
 - New topic → new numbered task folder. New round on an existing task → new numbered step folder inside it, so earlier rounds are never overwritten.
-- Each step's deliverable is a small Tailwind-styled `index.html`.
+- Each step's deliverable is a self-contained `index.html`, built with the `bb-visual-explainer` skill:
+  no network requests, sidebar navigation, light and dark themes, and a print stylesheet.
 
 Finished with something? Say **"archive 5"** or **"archive lego wheels"** and it moves to `archive/` with its structure intact. `restore` brings it back. Nothing is ever deleted.
 

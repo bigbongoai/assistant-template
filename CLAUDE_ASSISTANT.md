@@ -52,9 +52,11 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 
    **`backup: local`** — remove `origin`, don't push anything, and tell them in one line that their work lives only on this machine. Never run `git push` for them afterwards.
 
-   **`storage: org`** — if `assistant.config.local.json` has `storage.credentials`, copy those straight into `.env` and don't ask for anything. Otherwise write the keys they pasted, taking the bucket from the merged config. Leave `R2_PUBLIC_BASE` empty unless a custom domain really does serve the bucket publicly — `r2 share` issues links that expire, and that only means something while the plain URL doesn't work.
+   **Credentials - you never handle the values.** Run `python3 setup/apply-secrets.py`. It reads the org overlay and the form's answers itself and writes `.env` at mode 600, printing only key names. Do not open `assistant.config.local.json`, do not open `answers.json`, and do not write credential lines yourself: a secret you have read is already in the transcript, and no rule about not echoing it can undo that.
 
-   **`storage: own`** — write their endpoint, bucket and keys. If they gave no public URL, leave `R2_PUBLIC_BASE` empty; `r2 share` will refuse rather than print a dead link.
+   **`storage: org`** - the overlay carries the keys, so the script needs nothing from you. **`storage: own`** - their keys arrive through the form, so the script picks them up the same way. **`storage: none`** - the script writes nothing and says so. In every case, run it once and report which key names it wrote. Leave `R2_PUBLIC_BASE` unset unless a custom domain really does serve the bucket publicly - `r2 share` issues links that expire, and that only means something while the plain URL doesn't work.
+
+   If they gave no public URL, `R2_PUBLIC_BASE` stays empty and `r2 share` refuses rather than printing a dead link.
 
    **`storage: none`** — leave the R2 fields empty. `bin/r2` already explains itself if called. Don't offer uploads in later sessions unless they ask.
 
@@ -62,7 +64,7 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 
    **`publish: none`** - record it and do not bring it up again unless they ask. Sharing a file still works through `./bin/r2 share`, without the Ask AI drawer.
 
-   **Never echo a key** into the chat, a task file, or a commit.
+   **Never read a key in the first place.** The old rule here was "never echo a key", which assumed you were holding one. You are not: `apply-secrets.py` is the only thing that touches values.
 
    Then run `./setup.sh` for the mechanical parts (`pull.rebase`, `chmod`).
 5. **The one thing they must type themselves.** Ask AI serves deliverables at `http://pa.lcl:1111`, which needs one line in `/etc/hosts`. `sudo` prompts for their password, so you cannot do this for them - it is the single exception to "never ask them to run a command". Check first with `grep pa.lcl /etc/hosts`; if it is already there, say nothing at all. If it is missing, hand them the line and say what it does in one sentence - a local nickname for this machine, nothing exposed to the network:

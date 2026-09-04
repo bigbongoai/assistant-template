@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """publish - put a deliverable online, with its Ask AI drawer still working.
 
-A deliverable in this workspace is one self-contained HTML file. Opened from
-disk it is just a page; served by the local Ask AI proxy it gains a chat drawer
-you can select text in and ask about. `bin/r2 share` can hand someone the file,
-but the drawer stops working, because the drawer needs a server.
+A deliverable in an assistant workspace is one self-contained HTML file. Opened
+from disk it is just a page; served by the local Ask AI proxy it gains a chat
+drawer you can select text in and ask about. Handing someone the file loses the
+drawer, because the drawer needs a server.
 
-This sends the page to briefings.page instead, which serves it and runs the drawer
-there. The result is a link you can send to anyone.
+This sends the page to briefings.page instead, which serves it and runs the
+drawer there. The result is a link you can send to anyone.
 
     ./bin/publish tasks/19.pricing/19-01.research/index.html
     ./bin/publish list
@@ -19,7 +19,8 @@ no password and nothing to copy: you approve it in the browser, and this script
 collects the credential over its own connection and writes it to .env. The
 token is never printed, and never travels through the browser.
 
-Standard library only, like _askai/server.py. No install step.
+Drop this file at bin/publish in the workspace it publishes from. Standard
+library only. No install step.
 """
 import http.server
 import json
@@ -49,6 +50,8 @@ HOST_KEY = "BRIEFINGS_HOST"
 # task folder.
 MAX_NOTES = 40
 
+USER_AGENT = "briefings-publish/1.0"
+
 
 def die(msg, code=1):
     print(f"publish: {msg}", file=sys.stderr)
@@ -59,7 +62,7 @@ def die(msg, code=1):
 
 
 def read_env():
-    """KEY=VALUE pairs from .env. Values may be quoted, as bin/r2 writes them."""
+    """KEY=VALUE pairs from .env. Values may be quoted."""
     values = {}
     if not ENV.exists():
         return values
@@ -115,7 +118,10 @@ def api(path, payload=None, token=None, method=None, timeout=60):
     """One JSON call. Returns (status, parsed-body)."""
     url = f"{host()}{path}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Accept": "application/json"}
+    # Name ourselves. Cloudflare's bot rules refuse the default
+    # "Python-urllib/3.x" outright, so without this every call is a 403 that
+    # looks like a server fault.
+    headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
     if data is not None:
         headers["Content-Type"] = "application/json"
     if token:

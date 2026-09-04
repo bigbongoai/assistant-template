@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-"""Shared Ask-AI proxy for every spec explainer in specs/.
+"""Shared Ask-AI proxy for every HTML deliverable in this workspace.
 
-One server, one API key, one place to fix bugs. It serves any `specs/**/*.html`
-and injects the Ask AI bundle at serve time, so every explainer gets the feature
-without being edited.
+One server, one API key, one place to fix bugs. It serves any page under
+`tasks/` (plus `archive/` and `examples/`) and injects the Ask AI bundle at
+serve time, so a new deliverable gets the feature simply by existing. Never add
+a per-task copy of this server.
 
 Each HTML file gets its OWN SQLite database next to it:
 
-    specs/198@-local-agent-build-architecture/198-visual-overview.askai.sqlite3
+    tasks/19.pricing/19-11.company-size/index.askai.sqlite3
 
 Cross-document contamination is therefore impossible by construction rather than
 by a filter an endpoint could forget.
 
 Context sent to the model = the selected passage + the page's rendered text +
-every sibling `.md` file in the same spec folder, read fresh on each request.
+the `.md` notes beside the page and at the root of its task folder, read fresh
+on each request.
 
 Standard library only. Run from anywhere:
 
-    python3 specs/_askai/server.py
+    python3 _askai/server.py
 
-The Anthropic key is read from the repo root `.env` (`ANTHROPIC_API_KEY`) and is
-never logged, echoed, or returned to the browser.
+`/` lists every page in the workspace; `/page/<path>` serves one with the drawer.
+
+The Anthropic key is read from the workspace root `.env` (`ANTHROPIC_API_KEY`)
+and is never logged, echoed, or returned to the browser.
 """
 
 import json
@@ -161,6 +165,21 @@ def sibling_markdown(doc: Path) -> list[tuple[str, str]]:
             except OSError:
                 continue
     return out
+
+
+def sibling_markdown_count(doc: Path) -> int:
+    """How many notes `sibling_markdown` would return, without reading them.
+
+    The index shows this number for every page at once, and reading every `.md`
+    in every task folder just to length-check the list made listing the
+    workspace cost far more than serving a page. Same folders, same dedupe, so
+    the count can never disagree with what the model is handed.
+    """
+    folders = [doc.parent]
+    task_root = task_folder_for(doc)
+    if task_root and task_root != doc.parent:
+        folders.append(task_root)
+    return sum(len(list(folder.glob("*.md"))) for folder in folders)
 
 
 def lock_for(db: Path) -> threading.Lock:
@@ -448,6 +467,10 @@ def discover_pages() -> list[dict[str, Any]]:
             number = int(match.group(1)) if match else None
             # Everything between the task folder and the file is the step path.
             step_parts = parts[2:-1]
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
             found.append({
                 "rel": str(rel),
                 "area": area,
@@ -455,10 +478,14 @@ def discover_pages() -> list[dict[str, Any]]:
                 "task": humanize(match.group(2)) if match else humanize(task_dir),
                 "task_dir": task_dir,
                 "step": " / ".join(humanize(p) for p in step_parts),
+                # The task is already the group heading, so the row only needs
+                # the part of the path below it.
+                "detail": "/".join(parts[2:]) or path.name,
                 "file": path.name,
                 "title": page_title(path),
                 "has_db": db_path_for(path).exists(),
-                "sources": len(sibling_markdown(path)),
+                "sources": sibling_markdown_count(path),
+                "mtime": mtime,
             })
     # Newest task first; archived work sinks below active work.
     found.sort(key=lambda f: (
@@ -470,61 +497,359 @@ def discover_pages() -> list[dict[str, Any]]:
     return found
 
 
+# ---------------------------------------------------------------- index page
+
+# The page below is assembled with an f-string, so CSS and JS live in plain
+# string constants: no doubled braces to get wrong, and no reason to touch them
+# when the markup changes.
+
 INDEX_CSS = """
-:root { --bg:#f7f7f5; --card:#fff; --ink:#1a1a18; --muted:#6b6b66; --line:#e3e3de;
-        --accent:#b5541f; --chip:#efefe9; }
-@media (prefers-color-scheme: dark) {
-  :root { --bg:#17171a; --card:#1f1f23; --ink:#ececea; --muted:#9a9a95; --line:#33333a;
-          --accent:#e08050; --chip:#2a2a30; }
+:root{--bg:#f7f7f5;--surface:#fff;--panel:#fff;--border:#e3e3de;
+--copy:#1a1a18;--muted:#55554f;--subtle:#85857e;--primary:#b5541f;
+--on-bg:#b5541f;--on-fg:#fff;--chip:#efefe9;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,ui-sans-serif,sans-serif;
+--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){
+:root{--bg:#17171a;--surface:#1f1f23;--panel:#1f1f23;--border:#33333a;
+--copy:#ececea;--muted:#b8b8b2;--subtle:#8f8f89;--primary:#e08050;
+--on-bg:#e08050;--on-fg:#17171a;--chip:#2a2a30}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--copy);font-family:var(--sans);
+padding:44px 20px 80px;line-height:1.6;-webkit-text-size-adjust:100%}
+.wrap{max-width:900px;margin:0 auto}
+.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
+text-transform:uppercase;color:var(--subtle)}
+h1{font-size:30px;margin:10px 0 6px;font-weight:660;letter-spacing:-.02em}
+.lede{color:var(--muted);margin:0 0 11px;max-width:66ch;font-size:14.5px}
+code{font-family:var(--mono);font-size:.9em}
+
+/* The search block stays put while the list scrolls under it, so the filters
+   and the result count are readable from anywhere in a long workspace. */
+.search{position:sticky;top:0;z-index:5;background:var(--bg);
+padding:10px 0 14px;margin-bottom:4px}
+.field{display:flex;align-items:center;gap:10px;border:1px solid var(--border);
+background:var(--surface);border-radius:10px;padding:0 12px;cursor:text}
+.field:focus-within{border-color:var(--primary)}
+.field svg{width:15px;height:15px;flex:none;color:var(--subtle)}
+#q{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--copy);
+font-family:var(--sans);font-size:15px;padding:11px 0}
+#q::placeholder{color:var(--subtle)}
+#q::-webkit-search-cancel-button{filter:grayscale(1) opacity(.5)}
+kbd{font-family:var(--mono);font-size:10px;color:var(--subtle);
+border:1px solid var(--border);border-radius:4px;padding:1px 5px;
+background:var(--chip);white-space:nowrap}
+.status{display:flex;justify-content:space-between;align-items:center;
+gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;
+color:var(--subtle);margin-top:9px}
+.hint{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+
+.filters{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0 0;align-items:center}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.chips .lbl{font-family:var(--mono);font-size:10px;color:var(--subtle);
+text-transform:uppercase;letter-spacing:.07em;margin-right:2px}
+.chip{font:inherit;font-size:12.5px;color:var(--muted);background:var(--panel);
+border:1px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;
+display:inline-flex;align-items:center;gap:6px;line-height:1}
+.chip:hover{border-color:var(--primary);color:var(--copy)}
+.chip.on{background:var(--on-bg);border-color:var(--on-bg);color:var(--on-fg)}
+.chip .c{font-family:var(--mono);font-size:10.5px;color:var(--subtle)}
+.chip.on .c{color:var(--on-fg);opacity:.75}
+
+section.group{margin:0 0 18px}
+.group-head{display:flex;align-items:baseline;gap:.55rem;margin:0 0 .45rem}
+.num{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--muted);
+background:var(--chip);padding:.18em .5em;border-radius:5px;letter-spacing:.02em}
+.group-name{font-weight:600;font-size:15px;overflow-wrap:anywhere}
+.gc{font-family:var(--mono);font-size:10.5px;color:var(--subtle)}
+
+ul{list-style:none;padding:0;margin:0}
+li.row{margin-bottom:6px}
+.hit{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+gap:4px 14px;text-decoration:none;color:var(--copy);border:1px solid var(--border);
+background:var(--panel);border-radius:10px;padding:10px 14px}
+.hit:hover,li.row.on .hit{border-color:var(--primary)}
+li.row.on .hit{background:var(--surface)}
+.body{min-width:0}
+.title{display:block;font-size:14.5px;font-weight:600;overflow-wrap:anywhere}
+.detail{display:block;font-family:var(--mono);font-size:10.5px;
+color:var(--subtle);margin-top:2px;overflow-wrap:anywhere}
+.meta{font-family:var(--mono);font-size:10.5px;color:var(--subtle);
+white-space:nowrap;text-align:right}
+.meta .db{color:var(--primary)}
+
+.divider{display:flex;align-items:center;gap:12px;margin:26px 0 12px;
+font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+text-transform:uppercase;color:var(--subtle)}
+.divider:after{content:"";flex:1;height:1px;background:var(--border)}
+#empty{border:1px dashed var(--border);border-radius:10px;padding:28px 18px;
+text-align:center;color:var(--subtle);font-size:13.5px}
+
+@media (max-width:560px){
+body{padding:32px 14px 64px}
+h1{font-size:24px}
+.hit{grid-template-columns:minmax(0,1fr);padding:10px 12px;align-items:start}
+.meta{text-align:left;white-space:normal;margin-top:3px}
 }
-* { box-sizing:border-box; }
-body { margin:0; padding:2.5rem 1.25rem 5rem; background:var(--bg); color:var(--ink);
-       font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-.wrap { max-width:900px; margin:0 auto; }
-h1 { font-size:1.7rem; margin:0 0 .3rem; letter-spacing:-.02em; }
-.sub { color:var(--muted); margin:0 0 1.6rem; }
-#q { width:100%; padding:.65rem .8rem; font:inherit; font-size:.95rem; margin-bottom:1.8rem;
-     background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:9px; }
-#q:focus { outline:2px solid var(--accent); outline-offset:-1px; }
-.task { margin-bottom:1.6rem; }
-.task-head { display:flex; align-items:baseline; gap:.55rem; margin:0 0 .5rem; }
-.num { font:600 .72rem ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted);
-       background:var(--chip); padding:.15em .5em; border-radius:5px; }
-.task-name { font-weight:600; }
-.archived { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
-.rows { border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--card); }
-a.row { display:flex; align-items:center; gap:.8rem; padding:.7rem .9rem; text-decoration:none;
-        color:inherit; border-top:1px solid var(--line); }
-a.row:first-child { border-top:0; }
-a.row:hover { background:var(--chip); }
-.t { flex:1; min-width:0; }
-.t b { display:block; font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.t span { color:var(--muted); font-size:.83rem; }
-.meta { color:var(--muted); font-size:.76rem; white-space:nowrap; }
-.dot { color:var(--accent); }
-.empty { color:var(--muted); padding:2rem 0; }
 """
 
 INDEX_JS = """
-var q = document.getElementById('q');
-q.addEventListener('input', function () {
-  var needle = q.value.toLowerCase().trim();
-  document.querySelectorAll('.task').forEach(function (group) {
-    var any = false;
-    group.querySelectorAll('a.row').forEach(function (row) {
-      var hit = !needle || row.dataset.search.indexOf(needle) !== -1;
-      row.style.display = hit ? '' : 'none';
-      if (hit) any = true;
+(function () {
+  var input = document.getElementById('q');
+  var countEl = document.getElementById('count');
+  var emptyEl = document.getElementById('empty');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('li.row'));
+  var groups = Array.prototype.slice.call(document.querySelectorAll('section.group'));
+  var areas = Array.prototype.slice.call(document.querySelectorAll('section.area'));
+  var chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
+  var total = rows.length;
+  var shown = rows.slice();
+  var cursor = -1;
+  /* Two independent filters that combine with each other and with the search
+     box. Every one of them is read off the filesystem, so none of them can
+     claim something the workspace does not actually record. */
+  var pick = { show: 'all', where: 'all' };
+
+  function matches(row) {
+    var s = pick.show;
+    if (s === 'recent' && row.getAttribute('data-recent') !== '1') { return false; }
+    if (s === 'threads' && row.getAttribute('data-threads') !== '1') { return false; }
+    if (s === 'no-notes' && row.getAttribute('data-notes') !== '0') { return false; }
+    if (pick.where !== 'all' && row.getAttribute('data-area') !== pick.where) {
+      return false;
+    }
+    return true;
+  }
+
+  /* The chip's own label is the wording, so the summary line can never drift
+     from the button the reader just pressed. */
+  function labelFor(group) {
+    for (var i = 0; i < chips.length; i++) {
+      if (chips[i].getAttribute('data-group') === group
+        && chips[i].getAttribute('data-value') === pick[group]) {
+        return chips[i].firstChild.textContent.trim().toLowerCase();
+      }
+    }
+    return pick[group];
+  }
+
+  function describe(q) {
+    var bits = [];
+    if (pick.show !== 'all') { bits.push(labelFor('show')); }
+    if (pick.where !== 'all') { bits.push(labelFor('where')); }
+    if (q) { bits.push('"' + q + '"'); }
+    return bits.length
+      ? shown.length + ' of ' + total + ' · ' + bits.join(' · ')
+      : total + ' page' + (total === 1 ? '' : 's');
+  }
+
+  function paintCursor() {
+    for (var i = 0; i < rows.length; i++) { rows[i].classList.remove('on'); }
+    if (cursor >= 0 && cursor < shown.length) {
+      shown[cursor].classList.add('on');
+      shown[cursor].scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function apply() {
+    var q = input.value.trim().toLowerCase();
+    shown = [];
+    for (var i = 0; i < rows.length; i++) {
+      var hit = (q === '' || rows[i].getAttribute('data-hay').indexOf(q) !== -1)
+        && matches(rows[i]);
+      rows[i].hidden = !hit;
+      if (hit) { shown.push(rows[i]); }
+    }
+    /* A task heading with nothing under it, or an "Archived" rule with no
+       archived rows below it, would both be lying about what is on screen. */
+    for (var g = 0; g < groups.length; g++) {
+      var visible = groups[g].querySelectorAll('li.row:not([hidden])').length;
+      groups[g].hidden = visible === 0;
+      var badge = groups[g].querySelector('.gc');
+      if (badge) { badge.textContent = visible; }
+    }
+    for (var a = 0; a < areas.length; a++) {
+      areas[a].hidden = !areas[a].querySelector('section.group:not([hidden])');
+    }
+    countEl.textContent = describe(q);
+    emptyEl.hidden = shown.length !== 0;
+    cursor = (q && shown.length) ? 0 : -1;
+    paintCursor();
+  }
+
+  for (var c = 0; c < chips.length; c++) {
+    chips[c].addEventListener('click', function (e) {
+      var group = e.currentTarget.getAttribute('data-group');
+      pick[group] = e.currentTarget.getAttribute('data-value');
+      for (var j = 0; j < chips.length; j++) {
+        if (chips[j].getAttribute('data-group') === group) {
+          chips[j].classList.toggle('on', chips[j] === e.currentTarget);
+        }
+      }
+      apply();
     });
-    group.style.display = any ? '' : 'none';
+  }
+
+  function move(step) {
+    if (!shown.length) { return; }
+    cursor = (cursor + step + shown.length) % shown.length;
+    paintCursor();
+  }
+
+  function openCursor() {
+    var row = cursor >= 0 ? shown[cursor] : (shown.length === 1 ? shown[0] : null);
+    if (row) { window.location.href = row.querySelector('a').getAttribute('href'); }
+  }
+
+  input.addEventListener('input', apply);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+    var active = document.activeElement;
+    var typing = active === input;
+
+    if (e.key === '/' && !typing) {
+      e.preventDefault();
+      input.focus();
+      input.select();
+      return;
+    }
+    if (e.key === 'Escape') {
+      input.value = '';
+      apply();
+      input.blur();
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
+    if (e.key === 'Enter') {
+      if (active && active.tagName === 'A') { return; }
+      if (cursor >= 0 || shown.length === 1) { e.preventDefault(); openCursor(); }
+    }
   });
-});
-q.focus();
+
+  apply();
+  input.focus();
+})();
 """
+
+SEARCH_ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
+    '<path d="M20 20l-3.6-3.6"></path></svg>'
+)
+
+# What "Last 7 days" means, in one place, so the chip and the lede agree.
+RECENT_DAYS = 7
+
+
+def stamp(mtime: float, now: datetime) -> str:
+    """`12 Aug`, or `12 Aug 25` once the year stops being obvious."""
+    if not mtime:
+        return ""
+    when = datetime.fromtimestamp(mtime)
+    tail = "" if when.year == now.year else f" {when:%y}"
+    return f"{when.day} {when:%b}{tail}"
+
+
+def render_row(page: dict[str, Any]) -> str:
+    """One index row: the page's own title, the path under its task, then meta."""
+    href = "/page/" + quote(page["rel"])
+    title = html_escape(page["title"])
+    detail = html_escape(page["detail"])
+    sources = page["sources"]
+
+    meta = []
+    if sources:
+        meta.append(f'{sources} note{"" if sources == 1 else "s"}')
+    if page["has_db"]:
+        meta.append('<span class="db">threads</span>')
+    if page["date"]:
+        meta.append(html_escape(page["date"]))
+
+    # One lowercase blob per row is all the filter ever reads, so typing a task
+    # number, a step name, a word from the title, or part of the path all hit
+    # the same way.
+    hay = html_escape(
+        " ".join([
+            str(page["number"]) if page["number"] is not None else "",
+            page["title"], page["task"], page["task_dir"], page["step"],
+            page["file"], page["rel"],
+        ]).lower(),
+        quote=True,
+    )
+
+    return (
+        f'<li class="row" data-hay="{hay}"'
+        f' data-area="{html_escape(page["area"], quote=True)}"'
+        f' data-notes="{sources}"'
+        f' data-threads="{1 if page["has_db"] else 0}"'
+        f' data-recent="{1 if page["recent"] else 0}">'
+        f'<a class="hit" href="{href}">'
+        f'<span class="body"><span class="title">{title}</span>'
+        f'<span class="detail">{detail}</span></span>'
+        f'<span class="meta">{" &middot; ".join(meta)}</span>'
+        "</a></li>"
+    )
+
+
+def render_chips(pages: list[dict[str, Any]]) -> str:
+    """Filters with live counts, all of them read off the filesystem.
+
+    This workspace has no `status:` field anywhere, so there is deliberately no
+    status filter: a chip claiming a task is "done" would be inventing the fact.
+    What is left is what the files themselves record - when a page last changed,
+    whether a conversation database sits next to it, whether it has any working
+    notes behind it, and which content folder it lives in.
+    """
+    total = len(pages)
+
+    show: list[tuple[str, str, int]] = [("all", "All", total)]
+    for value, label, test in (
+        ("recent", f"Last {RECENT_DAYS} days", lambda p: p["recent"]),
+        ("threads", "With threads", lambda p: p["has_db"]),
+        ("no-notes", "No notes", lambda p: not p["sources"]),
+    ):
+        found = sum(1 for p in pages if test(p))
+        # A filter that matches everything, or nothing, tells the reader nothing
+        # and only costs them a row of buttons to scan.
+        if 0 < found < total:
+            show.append((value, label, found))
+
+    # Derived from what is actually on disk, so a workspace with no archive/ or
+    # examples/ never sees the row at all.
+    where: list[tuple[str, str, int]] = [("all", "All", total)]
+    for area in CONTENT_DIRS:
+        found = sum(1 for p in pages if p["area"] == area)
+        if found:
+            where.append((area, humanize(area), found))
+
+    def row(group: str, label: str, chips: list[tuple[str, str, int]]) -> str:
+        buttons = "".join(
+            f'<button type="button" class="chip{" on" if value == "all" else ""}"'
+            f' data-group="{group}" data-value="{html_escape(value, quote=True)}">'
+            f'{html_escape(text)} <span class="c">{count}</span></button>'
+            for value, text, count in chips
+        )
+        return f'<div class="chips"><span class="lbl">{label}</span>{buttons}</div>'
+
+    show_row = row("show", "Show", show) if len(show) > 1 else ""
+    where_row = row("where", "Where", where) if len(where) > 2 else ""
+    if not show_row and not where_row:
+        return ""
+    return f'<div class="filters">{show_row}{where_row}</div>'
 
 
 def render_index() -> bytes:
     pages = discover_pages()
+    now = datetime.now()
+    cutoff = now.timestamp() - RECENT_DAYS * 86400
+    for page in pages:
+        page["recent"] = page["mtime"] >= cutoff
+        page["date"] = stamp(page["mtime"], now)
+
+    # Pages are already sorted area-major, newest task first, so consecutive
+    # runs of the same task are exactly the groups we want.
     groups: list[tuple[tuple[str, str], list[dict[str, Any]]]] = []
     for page in pages:
         key = (page["area"], page["task_dir"])
@@ -532,49 +857,71 @@ def render_index() -> bytes:
             groups.append((key, []))
         groups[-1][1].append(page)
 
-    blocks = []
+    sections: list[str] = []
+    current_area = None
     for (area, _task_dir), rows in groups:
-        first = rows[0]
-        label = f'<span class="num">{html_escape(str(first["number"]))}</span>' if first["number"] is not None else ""
-        archived = '<span class="archived">archived</span>' if area == "archive" else ""
-        items = []
-        for page in rows:
-            haystack = " ".join([
-                page["title"], page["task"], page["step"], page["file"], page["rel"],
-            ]).lower()
-            meta = []
-            if page["sources"]:
-                meta.append(f'{page["sources"]} note{"s" if page["sources"] != 1 else ""}')
-            if page["has_db"]:
-                meta.append('<span class="dot">&#9679;</span> threads')
-            items.append(
-                f'<a class="row" href="/page/{quote(page["rel"])}" '
-                f'data-search="{html_escape(haystack)}">'
-                f'<span class="t"><b>{html_escape(page["title"])}</b>'
-                f'<span>{html_escape(page["step"] or page["file"])}</span></span>'
-                f'<span class="meta">{" &middot; ".join(meta)}</span></a>'
+        if area != current_area:
+            if current_area is not None:
+                sections.append("</section>")
+            # `tasks/` is the main sequence and needs no announcement; anything
+            # else gets a rule, so archived work is visibly set apart from live
+            # work rather than blending into the end of the list.
+            rule = (
+                f'<div class="divider">{html_escape(humanize(area))}</div>'
+                if area != CONTENT_DIRS[0] else ""
             )
-        blocks.append(
-            f'<div class="task"><div class="task-head">{label}'
-            f'<span class="task-name">{html_escape(first["task"])}</span>{archived}</div>'
-            f'<div class="rows">{"".join(items)}</div></div>'
-        )
+            sections.append(f'<section class="area">{rule}')
+            current_area = area
 
-    body = "".join(blocks) or '<p class="empty">No HTML deliverables found yet.</p>'
+        first = rows[0]
+        number = first["number"]
+        label = (
+            f'<span class="num">{html_escape(str(number))}</span>'
+            if number is not None else ""
+        )
+        items = "".join(render_row(page) for page in rows)
+        sections.append(
+            f'<section class="group"><div class="group-head">{label}'
+            f'<span class="group-name">{html_escape(first["task"])}</span>'
+            f'<span class="gc">{len(rows)}</span></div>'
+            f"<ul>{items}</ul></section>"
+        )
+    if current_area is not None:
+        sections.append("</section>")
+
+    listing = "".join(sections) or ""
     count = len(pages)
-    html = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+    plural = "" if count == 1 else "s"
+    folders = ", ".join(f"<code>{area}/</code>" for area in CONTENT_DIRS)
+
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ask AI &middot; workspace</title>
-<style>{INDEX_CSS}</style></head>
-<body><div class="wrap">
-<h1>Ask AI</h1>
-<p class="sub">{count} page{"s" if count != 1 else ""} across your tasks. Open one, select any
-passage, and ask about it &mdash; the passage stays highlighted with its thread attached.</p>
-<input id="q" type="search" placeholder="Filter by task, step, or title&hellip;" autocomplete="off">
-{body}
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9998;</text></svg>">
+<style>{INDEX_CSS}</style></head><body><div class="wrap">
+<div class="eyebrow">_askai</div>
+<h1>Workspace pages</h1>
+<p class="lede">Every HTML deliverable under {folders}, newest task first, served with
+Ask AI injected. Select any passage on a page to ask about it. Each page keeps its own
+threads and highlights in its own database sitting next to the file, and answers are
+grounded in that task's working notes.</p>
+<p class="lede">Nothing here claims a task is finished: this workspace records no status
+anywhere, so the index does not invent one. Every count is read off the files - <b>notes</b>
+is how many <code>.md</code> files the model is given for that page (those beside it, plus
+those at its task root), <b>threads</b> means a conversation database already sits next to
+it, and the date is the file's last-modified time.</p>
+<div class="search">
+<label class="field" for="q">{SEARCH_ICON}<input id="q" type="search" autocomplete="off"
+spellcheck="false" placeholder="Filter by task, step, title, or path"><kbd>/</kbd></label>
+<div class="status"><span id="count">{count} page{plural}</span>
+<span class="hint"><kbd>/</kbd> search <kbd>esc</kbd> clear <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move
+<kbd>enter</kbd> open</span></div>
+{render_chips(pages)}
+</div>
+{listing}
+<div id="empty" hidden>{"Nothing matches. Clear a filter above, or search a task number like <code>19</code>, a step name, or a word from the page title." if count else "No HTML deliverables found yet. Add one under <code>tasks/</code> and it appears here."}</div>
 </div><script>{INDEX_JS}</script></body></html>"""
-    return html.encode("utf-8")
+    return body.encode("utf-8")
 
 
 def crumb_for(rel: str) -> dict[str, Any]:

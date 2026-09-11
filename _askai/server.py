@@ -33,6 +33,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
@@ -403,6 +404,20 @@ NUM_PREFIX_RE = re.compile(r"^\d+(?:[-.]\d+)*[-.\s]*")
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 TITLE_SCAN_BYTES = 16384
 
+# A step folder's number exactly as written: `19-15.one-price-list` gives `19-15`,
+# `01-research` gives `01`. The last number in it is the one steps are ordered by.
+STEP_FOLDER_RE = re.compile(r"^(\d+(?:-\d+)*)[-.](.+)$")
+# Pages sitting directly in a task folder, outside any step, are kept under this key.
+ROOT_STEP = "."
+
+# Everything a folder name cannot say about a task lives in one small file in it:
+# display titles, a few words per step, groups, and the arrows between steps.
+TASK_FILE = "_task.json"
+TITLE_MAX = 80
+
+# path -> (mtime_ns, size, parsed). Re-read only when the file changes.
+_meta_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
+
 # path -> (mtime, size, title). Titles are only re-read when the file changes.
 _title_cache: dict[str, tuple[float, int, str]] = {}
 
@@ -450,6 +465,82 @@ def page_title(path: Path) -> str:
     return title
 
 
+def parse_step(folder: str) -> tuple[str, int, str]:
+    """`19-15.one-price-list` -> ("19-15", 15, "One price list").
+
+    The number is kept exactly as written, because that is how steps are
+    referred to in conversation. Folders with no number sort after numbered ones.
+    """
+    if folder == ROOT_STEP:
+        return "", -1, "Task folder"
+    match = STEP_FOLDER_RE.match(folder)
+    if not match:
+        return "", -1, humanize(folder)
+    number = match.group(1)
+    return number, int(number.split("-")[-1]), humanize(match.group(2))
+
+
+def page_record(path: Path) -> dict[str, Any]:
+    """Everything the index, the task page and the top bar know about one page."""
+    rel = path.relative_to(ROOT)
+    parts = rel.parts
+    area = parts[0]
+    task_dir = parts[1] if len(parts) > 1 else ""
+    match = TASK_FOLDER_RE.match(task_dir)
+    number = int(match.group(1)) if match else None
+    # Everything between the task folder and the file is the step path. Its
+    # first folder is the step; a page straight in the task folder has none.
+    step_parts = parts[2:-1]
+    step_dir = parts[2] if len(parts) > 3 else ROOT_STEP
+    step_num, step_key, step_name = parse_step(step_dir)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return {
+        "rel": str(rel),
+        "area": area,
+        "number": number,
+        "task": humanize(match.group(2)) if match else humanize(task_dir),
+        "task_dir": task_dir,
+        "step": " / ".join(humanize(p) for p in step_parts),
+        "step_dir": step_dir,
+        "step_num": step_num,
+        "step_key": step_key,
+        "step_name": step_name,
+        # How far below its step folder the page sits; the shallowest page, and
+        # index.html among equals, is the one a step opens by default.
+        "step_depth": len(parts) - 3 if len(parts) > 3 else 0,
+        # The task is already the heading, so a row only needs the path below it.
+        "detail": "/".join(parts[2:]) or path.name,
+        "file": path.name,
+        "title": page_title(path),
+        "has_db": db_path_for(path).exists(),
+        "sources": sibling_markdown_count(path),
+        "mtime": mtime,
+    }
+
+
+def page_sort_key(page: dict[str, Any]) -> tuple:
+    """Newest task first; archived work sinks below active work."""
+    return (
+        CONTENT_DIRS.index(page["area"]),
+        -(page["number"] if page["number"] is not None else -1),
+        page["task_dir"],
+        page["rel"],
+    )
+
+
+def html_files(base: Path) -> list[Path]:
+    """Every HTML file under a folder, skipping scratch and tooling folders."""
+    found = []
+    for path in sorted(base.rglob("*.html")):
+        if SKIP_DIRS & set(path.relative_to(ROOT).parts):
+            continue
+        found.append(path)
+    return found
+
+
 def discover_pages() -> list[dict[str, Any]]:
     """Every HTML deliverable under the content folders, newest task first."""
     found: list[dict[str, Any]] = []
@@ -457,44 +548,297 @@ def discover_pages() -> list[dict[str, Any]]:
         base = ROOT / area
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*.html")):
-            if SKIP_DIRS & set(path.relative_to(ROOT).parts):
-                continue
-            rel = path.relative_to(ROOT)
-            parts = rel.parts
-            task_dir = parts[1] if len(parts) > 1 else ""
-            match = TASK_FOLDER_RE.match(task_dir)
-            number = int(match.group(1)) if match else None
-            # Everything between the task folder and the file is the step path.
-            step_parts = parts[2:-1]
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                mtime = 0.0
-            found.append({
-                "rel": str(rel),
-                "area": area,
-                "number": number,
-                "task": humanize(match.group(2)) if match else humanize(task_dir),
-                "task_dir": task_dir,
-                "step": " / ".join(humanize(p) for p in step_parts),
-                # The task is already the group heading, so the row only needs
-                # the part of the path below it.
-                "detail": "/".join(parts[2:]) or path.name,
-                "file": path.name,
-                "title": page_title(path),
-                "has_db": db_path_for(path).exists(),
-                "sources": sibling_markdown_count(path),
-                "mtime": mtime,
-            })
-    # Newest task first; archived work sinks below active work.
-    found.sort(key=lambda f: (
-        CONTENT_DIRS.index(f["area"]),
-        -(f["number"] if f["number"] is not None else -1),
-        f["task_dir"],
-        f["rel"],
-    ))
+        found.extend(page_record(path) for path in html_files(base))
+    found.sort(key=page_sort_key)
     return found
+
+
+# ------------------------------------------------------------------ tasks and steps
+
+
+def clean_text(value: Any, limit: int) -> str:
+    """Whitespace collapsed and cut to length; anything that is not text is empty."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:limit]
+
+
+def load_task_meta(folder: Path) -> dict[str, Any]:
+    """The task's `_task.json`, or {} when it has none. Cached on mtime.
+
+    A file that does not parse comes back as {"_error": ...}, so the task page
+    can say so instead of silently drawing the default. The dict is shared by
+    every caller: read it, never change it.
+    """
+    path = folder / TASK_FILE
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    key = str(path)
+    cached = _meta_cache.get(key)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("the top level has to be an object")
+    except (OSError, ValueError) as exc:     # JSONDecodeError is a ValueError
+        data = {"_error": str(exc)}
+    _meta_cache[key] = (stat.st_mtime_ns, stat.st_size, data)
+    return data
+
+
+def step_entry(meta: dict[str, Any], step_dir: str) -> dict[str, Any]:
+    steps = meta.get("steps")
+    entry = steps.get(step_dir) if isinstance(steps, dict) else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def finish_task(task: dict[str, Any]) -> dict[str, Any]:
+    """Group a task's pages into steps, newest step first, with display titles."""
+    rel = f'{task["area"]}/{task["task_dir"]}'
+    folder = ROOT / task["area"] / task["task_dir"]
+    meta = load_task_meta(folder) if folder.is_dir() else {}
+
+    members: dict[str, list[dict[str, Any]]] = {}
+    for page in task["pages"]:
+        members.setdefault(page["step_dir"], []).append(page)
+
+    steps = []
+    for step_dir, pages in members.items():
+        pages.sort(key=lambda p: (
+            p["step_depth"], 0 if p["file"].lower() == "index.html" else 1, p["rel"]))
+        main = pages[0]
+        entry = step_entry(meta, step_dir)
+        custom = clean_text(entry.get("title"), TITLE_MAX)
+        steps.append({
+            "dir": step_dir,
+            "num": main["step_num"],
+            "key": main["step_key"],
+            "name": main["step_name"],
+            # A renamed step shows its new name; otherwise its main page's <title>.
+            "title": custom or main["title"],
+            "custom": bool(custom),
+            "description": clean_text(entry.get("description"), 160),
+            "group": entry.get("group") if isinstance(entry.get("group"), str) else "",
+            "pages": pages,
+            "main": main,
+            "mtime": max(p["mtime"] for p in pages),
+        })
+    # Newest on top means the highest number first. Predictable, and it does not
+    # reshuffle when an old file is edited, which ordering by date would.
+    steps.sort(key=lambda s: (-s["key"], s["dir"]))
+
+    single = len(task["pages"]) == 1
+    task.update({
+        "rel": rel,
+        "folder": folder,
+        "meta": meta,
+        "steps": steps,
+        "mtime": max(p["mtime"] for p in task["pages"]),
+        # A task with one page has nothing to map, so it opens the page itself.
+        "href": ("/page/" + quote(task["pages"][0]["rel"])) if single
+                else ("/task/" + quote(rel) + "/"),
+    })
+    return task
+
+
+def build_tasks(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pages are sorted area-major, newest task first, so each run of the same
+    task folder is one task."""
+    tasks: list[dict[str, Any]] = []
+    for page in pages:
+        key = (page["area"], page["task_dir"])
+        if not tasks or (tasks[-1]["area"], tasks[-1]["task_dir"]) != key:
+            tasks.append({"area": page["area"], "task_dir": page["task_dir"],
+                          "number": page["number"], "name": page["task"], "pages": []})
+        tasks[-1]["pages"].append(page)
+    return [finish_task(task) for task in tasks]
+
+
+def resolve_task(rel: str) -> Path | None:
+    """Map a client-supplied `tasks/19.pricing` to a real task folder, or None.
+
+    Hostile input: it must name a folder directly inside one of the content
+    folders, and nothing that resolves anywhere else.
+    """
+    parts = [p for p in unquote(str(rel or "")).split("/") if p]
+    if len(parts) != 2 or parts[0] not in CONTENT_DIRS:
+        return None
+    name = parts[1]
+    if name in (".", "..") or name.startswith(".") or name in SKIP_DIRS:
+        return None
+    base = (ROOT / parts[0]).resolve()
+    folder = (base / name).resolve()
+    if folder.parent != base or not folder.is_dir():
+        return None
+    return folder
+
+
+def find_task(rel: str) -> dict[str, Any] | None:
+    """One task, built from its own folder rather than a walk of the workspace."""
+    folder = resolve_task(rel)
+    if folder is None:
+        return None
+    pages = sorted((page_record(p) for p in html_files(folder)), key=page_sort_key)
+    return build_tasks(pages)[0] if pages else None
+
+
+def plan_task(task: dict[str, Any]) -> dict[str, Any]:
+    """Columns, groups and arrows for the task page, read off `_task.json`.
+
+    Everything is optional. With no file, or a file with no groups, every step
+    goes into one group in number order. A step the file does not place lands
+    in a "Not in a group yet" column, so a missing entry is visible rather than
+    silently tucked into somebody else's group.
+    """
+    meta = task["meta"]
+    known = {s["dir"] for s in task["steps"]}
+
+    groups: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    last = 0
+    raw_groups = meta.get("groups") if isinstance(meta.get("groups"), list) else []
+    for raw in raw_groups:
+        if not isinstance(raw, dict):
+            continue
+        gid = raw.get("id")
+        if not isinstance(gid, str) or not gid.strip() or gid in ids:
+            continue
+        ids.add(gid)
+        column = raw.get("column")
+        if not isinstance(column, int) or isinstance(column, bool) or column < 1:
+            column = last + 1                # a column of its own, after the last
+        last = max(last, column)
+        groups.append({"id": gid, "title": clean_text(raw.get("title"), 60),
+                       "description": clean_text(raw.get("description"), 120),
+                       "column": column, "steps": []})
+
+    by_id = {g["id"]: g for g in groups}
+    loose = []
+    for step in task["steps"]:
+        target = by_id.get(step["group"])
+        (target["steps"] if target else loose).append(step)
+    groups = [g for g in groups if g["steps"]]
+    if loose:
+        if groups:
+            groups.append({"id": "", "title": "Not in a group yet",
+                           "description": f"Give these a group in {task['rel']}/{TASK_FILE}",
+                           "column": max(g["column"] for g in groups) + 1, "steps": loose})
+        else:
+            groups.append({"id": "", "title": "", "description": "", "column": 1,
+                           "steps": loose})
+
+    # Close up the numbering, so a gap in the file never draws an empty column.
+    order = sorted({g["column"] for g in groups})
+    renumber = {c: i + 1 for i, c in enumerate(order)}
+    for group in groups:
+        group["column"] = renumber[group["column"]]
+
+    arrows = []
+    seen: set[tuple[str, str]] = set()
+    raw_arrows = meta.get("arrows") if isinstance(meta.get("arrows"), list) else []
+    for raw in raw_arrows:
+        if not isinstance(raw, dict):
+            continue
+        src, dst = raw.get("from"), raw.get("to")
+        if not isinstance(src, str) or not isinstance(dst, str):
+            continue
+        if src not in known or dst not in known or src == dst or (src, dst) in seen:
+            continue
+        seen.add((src, dst))
+        arrows.append({"from": src, "to": dst, "label": clean_text(raw.get("label"), 60)})
+
+    return {
+        "groups": groups,
+        "columns": len(order),
+        "arrows": arrows,
+        # One group and nothing to connect is a plain grid of cards.
+        "grid": len(groups) == 1 and not arrows,
+    }
+
+
+def write_json_atomic(path: Path, data: Any) -> None:
+    """Write beside the target, flush to disk, then swap it in with one rename.
+
+    A reader sees the old file or the new one, never half of either. The
+    permissions of the file being replaced are kept.
+    """
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        mode = 0o644
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def rename_step(task_rel: str, step: Any, title: Any) -> tuple[int, dict[str, Any]]:
+    """Change one step's display title in `_task.json`. Never touches a folder.
+
+    Folder names are wired into deploy scripts, `_tasks.md`, relative links
+    between pages and the thread database beside every page, so a rename is a
+    display name only. Returns (HTTP status, JSON body).
+    """
+    task = find_task(task_rel)
+    if task is None:
+        return 404, {"error": "That task does not exist."}
+    steps = {s["dir"]: s for s in task["steps"]}
+    if not isinstance(step, str) or step not in steps:
+        return 404, {"error": f"{task['rel']} has no step called {step!r}."}
+    # A refused name is an answer, not a failure: it comes back as 200 with
+    # ok false, so the browser does not log an error for something the reader
+    # simply retypes. A missing task or an unreadable file is a real error.
+    if not isinstance(title, str):
+        return 200, {"ok": False, "error": "Send the new title as text."}
+
+    clean = " ".join(title.split())
+    if not clean:
+        return 200, {"ok": False, "error": "A title cannot be empty. Type a name, or press "
+                                           "Cancel to keep the current one."}
+    if len(clean) > TITLE_MAX:
+        return 200, {"ok": False, "error": f"That title is {len(clean)} characters long. "
+                                           f"Keep it to {TITLE_MAX} or fewer."}
+    if any(ord(ch) < 32 or 127 <= ord(ch) < 160 for ch in clean):
+        return 200, {"ok": False, "error": "The title contains a control character. "
+                                           "Use plain text."}
+
+    path = task["folder"] / TASK_FILE
+    name = f"{task['rel']}/{TASK_FILE}"
+    with lock_for(path):
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                return 409, {"error": f"{name} could not be read ({exc}), so nothing was "
+                                      "changed. Fix the file, then rename again."}
+            if not isinstance(data, dict):
+                return 409, {"error": f"{name} is not a JSON object, so nothing was changed."}
+        else:
+            data = {}
+        entries = data.setdefault("steps", {})
+        if not isinstance(entries, dict):
+            return 409, {"error": f'"steps" in {name} is not an object, so nothing was changed.'}
+        entry = entries.setdefault(step, {})
+        if not isinstance(entry, dict):
+            return 409, {"error": f'The entry for {step} in {name} is not an object, '
+                                  "so nothing was changed."}
+        entry["title"] = clean
+        write_json_atomic(path, data)
+    return 200, {"ok": True, "step": step, "title": clean}
 
 
 # ---------------------------------------------------------------- index page
@@ -517,7 +861,7 @@ INDEX_CSS = """
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--copy);font-family:var(--sans);
 padding:44px 20px 80px;line-height:1.6;-webkit-text-size-adjust:100%}
-.wrap{max-width:900px;margin:0 auto}
+.wrap{max-width:1100px;margin:0 auto}
 .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
 text-transform:uppercase;color:var(--subtle)}
 h1{font-size:30px;margin:10px 0 6px;font-weight:660;letter-spacing:-.02em}
@@ -556,24 +900,35 @@ display:inline-flex;align-items:center;gap:6px;line-height:1}
 .chip .c{font-family:var(--mono);font-size:10.5px;color:var(--subtle)}
 .chip.on .c{color:var(--on-fg);opacity:.75}
 
-section.group{margin:0 0 18px}
-.group-head{display:flex;align-items:baseline;gap:.55rem;margin:0 0 .45rem}
+/* One row per task. The task on the left opens its own page; its steps sit in
+   the column to the right, newest first, one line each, so sixteen still scan. */
+article.task{display:grid;grid-template-columns:minmax(0,240px) minmax(0,1fr);
+gap:8px 20px;border:1px solid var(--border);background:var(--panel);
+border-radius:12px;padding:12px 14px;margin:0 0 10px}
+.tside{min-width:0}
+.tlink{display:flex;align-items:baseline;gap:.55rem;text-decoration:none;
+color:var(--copy);border-radius:8px;padding:5px 7px;margin:-5px -7px 0;
+scroll-margin-top:170px}
+.tlink:hover .tname{color:var(--primary)}
+.tlink.on{background:var(--chip);box-shadow:inset 0 0 0 1px var(--primary)}
 .num{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--muted);
 background:var(--chip);padding:.18em .5em;border-radius:5px;letter-spacing:.02em}
-.group-name{font-weight:600;font-size:15px;overflow-wrap:anywhere}
-.gc{font-family:var(--mono);font-size:10.5px;color:var(--subtle)}
+.tname{font-weight:600;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.tmeta{font-family:var(--mono);font-size:10.5px;color:var(--subtle);margin-top:5px}
 
-ul{list-style:none;padding:0;margin:0}
-li.row{margin-bottom:6px}
-.hit{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
-gap:4px 14px;text-decoration:none;color:var(--copy);border:1px solid var(--border);
-background:var(--panel);border-radius:10px;padding:10px 14px}
-.hit:hover,li.row.on .hit{border-color:var(--primary)}
-li.row.on .hit{background:var(--surface)}
-.body{min-width:0}
-.title{display:block;font-size:14.5px;font-weight:600;overflow-wrap:anywhere}
-.detail{display:block;font-family:var(--mono);font-size:10.5px;
-color:var(--subtle);margin-top:2px;overflow-wrap:anywhere}
+ol.steps{list-style:none;margin:0;padding:0;min-width:0;display:flex;
+flex-direction:column;gap:1px}
+.pg{display:grid;grid-template-columns:3.4em minmax(0,1fr) auto;align-items:baseline;
+gap:10px;text-decoration:none;color:var(--copy);border-radius:6px;padding:3px 7px;
+scroll-margin-top:170px}
+.pg:hover,.pg.on{background:var(--chip)}
+.pg.on{box-shadow:inset 0 0 0 1px var(--primary)}
+.snum{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.stitle{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+white-space:nowrap}
+.pg:hover .stitle{color:var(--primary)}
+.pg.sub .stitle{font-size:12.5px;color:var(--muted)}
+.pg.sub .stitle:before{content:"\\21b3\\00a0";color:var(--subtle)}
 .meta{font-family:var(--mono);font-size:10.5px;color:var(--subtle);
 white-space:nowrap;text-align:right}
 .meta .db{color:var(--primary)}
@@ -585,11 +940,13 @@ text-transform:uppercase;color:var(--subtle)}
 #empty{border:1px dashed var(--border);border-radius:10px;padding:28px 18px;
 text-align:center;color:var(--subtle);font-size:13.5px}
 
-@media (max-width:560px){
+@media (max-width:640px){
 body{padding:32px 14px 64px}
 h1{font-size:24px}
-.hit{grid-template-columns:minmax(0,1fr);padding:10px 12px;align-items:start}
-.meta{text-align:left;white-space:normal;margin-top:3px}
+article.task{grid-template-columns:minmax(0,1fr);padding:11px 12px}
+.pg{grid-template-columns:3.4em minmax(0,1fr)}
+.stitle{white-space:normal;overflow-wrap:anywhere}
+.pg .meta{grid-column:2;text-align:left;white-space:normal}
 }
 """
 
@@ -598,27 +955,34 @@ INDEX_JS = """
   var input = document.getElementById('q');
   var countEl = document.getElementById('count');
   var emptyEl = document.getElementById('empty');
-  var rows = Array.prototype.slice.call(document.querySelectorAll('li.row'));
-  var groups = Array.prototype.slice.call(document.querySelectorAll('section.group'));
+  var tasks = Array.prototype.slice.call(document.querySelectorAll('article.task'));
   var areas = Array.prototype.slice.call(document.querySelectorAll('section.area'));
   var chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
-  var total = rows.length;
-  var shown = rows.slice();
+  /* Everything the arrow keys can land on: a task's own link and each page link. */
+  var movers = Array.prototype.slice.call(document.querySelectorAll('.tlink, .pg.it'));
+  /* One element per page: a step's page link, or a one-page task's own link. */
+  var total = document.querySelectorAll('[data-page]').length;
+  var stops = [];
+  var visible = 0;
   var cursor = -1;
   /* Two independent filters that combine with each other and with the search
      box. Every one of them is read off the filesystem, so none of them can
      claim something the workspace does not actually record. */
   var pick = { show: 'all', where: 'all' };
 
-  function matches(row) {
+  function matches(el) {
     var s = pick.show;
-    if (s === 'recent' && row.getAttribute('data-recent') !== '1') { return false; }
-    if (s === 'threads' && row.getAttribute('data-threads') !== '1') { return false; }
-    if (s === 'no-notes' && row.getAttribute('data-notes') !== '0') { return false; }
-    if (pick.where !== 'all' && row.getAttribute('data-area') !== pick.where) {
+    if (s === 'recent' && el.getAttribute('data-recent') !== '1') { return false; }
+    if (s === 'threads' && el.getAttribute('data-threads') !== '1') { return false; }
+    if (s === 'no-notes' && el.getAttribute('data-notes') !== '0') { return false; }
+    if (pick.where !== 'all' && el.getAttribute('data-area') !== pick.where) {
       return false;
     }
     return true;
+  }
+
+  function found(el, q) {
+    return q === '' || el.getAttribute('data-hay').indexOf(q) !== -1;
   }
 
   /* The chip's own label is the wording, so the summary line can never drift
@@ -639,41 +1003,66 @@ INDEX_JS = """
     if (pick.where !== 'all') { bits.push(labelFor('where')); }
     if (q) { bits.push('"' + q + '"'); }
     return bits.length
-      ? shown.length + ' of ' + total + ' · ' + bits.join(' · ')
-      : total + ' page' + (total === 1 ? '' : 's');
+      ? visible + ' of ' + total + ' pages · ' + bits.join(' · ')
+      : countEl.getAttribute('data-all');
   }
 
   function paintCursor() {
-    for (var i = 0; i < rows.length; i++) { rows[i].classList.remove('on'); }
-    if (cursor >= 0 && cursor < shown.length) {
-      shown[cursor].classList.add('on');
-      shown[cursor].scrollIntoView({ block: 'nearest' });
+    for (var i = 0; i < movers.length; i++) { movers[i].classList.remove('on'); }
+    if (cursor >= 0 && cursor < stops.length) {
+      stops[cursor].classList.add('on');
+      stops[cursor].scrollIntoView({ block: 'nearest' });
     }
   }
 
   function apply() {
     var q = input.value.trim().toLowerCase();
-    shown = [];
-    for (var i = 0; i < rows.length; i++) {
-      var hit = (q === '' || rows[i].getAttribute('data-hay').indexOf(q) !== -1)
-        && matches(rows[i]);
-      rows[i].hidden = !hit;
-      if (hit) { shown.push(rows[i]); }
+    var narrowed = q !== '' || pick.show !== 'all' || pick.where !== 'all';
+    stops = [];
+    visible = 0;
+    for (var t = 0; t < tasks.length; t++) {
+      var task = tasks[t];
+      var head = task.querySelector('.tlink');
+      if (task.classList.contains('single')) {
+        var ok = found(head, q) && matches(head);
+        task.hidden = !ok;
+        if (ok) { stops.push(head); visible++; }
+        continue;
+      }
+      var links = task.querySelectorAll('.pg.it');
+      var here = [];
+      for (var i = 0; i < links.length; i++) {
+        var on = found(links[i], q) && matches(links[i]);
+        links[i].hidden = !on;
+        if (on) { here.push(links[i]); }
+      }
+      var steps = task.querySelectorAll('li.step');
+      for (var s = 0; s < steps.length; s++) {
+        steps[s].hidden = !steps[s].querySelector('.pg.it:not([hidden])');
+      }
+      task.hidden = here.length === 0;
+      if (here.length) {
+        /* The task's own page is a stop only when the search names the task
+           itself, so typing a page's title puts the cursor on that page. */
+        if (q === '' || found(head, q)) { stops.push(head); }
+        stops = stops.concat(here);
+        visible += here.length;
+      }
+      var badge = task.querySelector('.gc');
+      if (badge) {
+        badge.textContent = narrowed
+          ? here.length + ' of ' + links.length + ' pages'
+          : badge.getAttribute('data-all');
+      }
     }
-    /* A task heading with nothing under it, or an "Archived" rule with no
-       archived rows below it, would both be lying about what is on screen. */
-    for (var g = 0; g < groups.length; g++) {
-      var visible = groups[g].querySelectorAll('li.row:not([hidden])').length;
-      groups[g].hidden = visible === 0;
-      var badge = groups[g].querySelector('.gc');
-      if (badge) { badge.textContent = visible; }
-    }
+    /* An "Archived" rule with no archived rows below it would be lying about
+       what is on screen. */
     for (var a = 0; a < areas.length; a++) {
-      areas[a].hidden = !areas[a].querySelector('section.group:not([hidden])');
+      areas[a].hidden = !areas[a].querySelector('article.task:not([hidden])');
     }
     countEl.textContent = describe(q);
-    emptyEl.hidden = shown.length !== 0;
-    cursor = (q && shown.length) ? 0 : -1;
+    emptyEl.hidden = visible !== 0;
+    cursor = (q && stops.length) ? 0 : -1;
     paintCursor();
   }
 
@@ -691,14 +1080,14 @@ INDEX_JS = """
   }
 
   function move(step) {
-    if (!shown.length) { return; }
-    cursor = (cursor + step + shown.length) % shown.length;
+    if (!stops.length) { return; }
+    cursor = (cursor + step + stops.length) % stops.length;
     paintCursor();
   }
 
   function openCursor() {
-    var row = cursor >= 0 ? shown[cursor] : (shown.length === 1 ? shown[0] : null);
-    if (row) { window.location.href = row.querySelector('a').getAttribute('href'); }
+    var el = cursor >= 0 ? stops[cursor] : (stops.length === 1 ? stops[0] : null);
+    if (el) { window.location.href = el.getAttribute('href'); }
   }
 
   input.addEventListener('input', apply);
@@ -724,7 +1113,7 @@ INDEX_JS = """
     if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
     if (e.key === 'Enter') {
       if (active && active.tagName === 'A') { return; }
-      if (cursor >= 0 || shown.length === 1) { e.preventDefault(); openCursor(); }
+      if (cursor >= 0 || stops.length === 1) { e.preventDefault(); openCursor(); }
     }
   });
 
@@ -752,13 +1141,9 @@ def stamp(mtime: float, now: datetime) -> str:
     return f"{when.day} {when:%b}{tail}"
 
 
-def render_row(page: dict[str, Any]) -> str:
-    """One index row: the page's own title, the path under its task, then meta."""
-    href = "/page/" + quote(page["rel"])
-    title = html_escape(page["title"])
-    detail = html_escape(page["detail"])
+def page_meta(page: dict[str, Any]) -> str:
+    """Notes, threads and date for one page, as the index has always shown them."""
     sources = page["sources"]
-
     meta = []
     if sources:
         meta.append(f'{sources} note{"" if sources == 1 else "s"}')
@@ -766,31 +1151,92 @@ def render_row(page: dict[str, Any]) -> str:
         meta.append('<span class="db">threads</span>')
     if page["date"]:
         meta.append(html_escape(page["date"]))
+    return " &middot; ".join(meta)
 
-    # One lowercase blob per row is all the filter ever reads, so typing a task
+
+def page_attrs(page: dict[str, Any], extra: str = "") -> str:
+    """What the search box and the filter chips read off one page."""
+    # One lowercase blob per page is all the filter ever reads, so typing a task
     # number, a step name, a word from the title, or part of the path all hit
     # the same way.
-    hay = html_escape(
-        " ".join([
-            str(page["number"]) if page["number"] is not None else "",
-            page["title"], page["task"], page["task_dir"], page["step"],
-            page["file"], page["rel"],
-        ]).lower(),
-        quote=True,
+    hay = html_escape(" ".join([
+        str(page["number"]) if page["number"] is not None else "",
+        page["title"], page["task"], page["task_dir"], page["step"],
+        page["file"], page["rel"], extra,
+    ]).lower(), quote=True)
+    return (
+        f' data-page="1" data-hay="{hay}"'
+        f' data-area="{html_escape(page["area"], quote=True)}"'
+        f' data-notes="{page["sources"]}"'
+        f' data-threads="{1 if page["has_db"] else 0}"'
+        f' data-recent="{1 if page["recent"] else 0}"'
     )
 
-    return (
-        f'<li class="row" data-hay="{hay}"'
-        f' data-area="{html_escape(page["area"], quote=True)}"'
-        f' data-notes="{sources}"'
-        f' data-threads="{1 if page["has_db"] else 0}"'
-        f' data-recent="{1 if page["recent"] else 0}">'
-        f'<a class="hit" href="{href}">'
-        f'<span class="body"><span class="title">{title}</span>'
-        f'<span class="detail">{detail}</span></span>'
-        f'<span class="meta">{" &middot; ".join(meta)}</span>'
-        "</a></li>"
-    )
+
+def step_hay(step: dict[str, Any]) -> str:
+    """A step's number, its display name, its folder name and its few words."""
+    return " ".join([step["num"], step["title"], step["name"], step["description"]])
+
+
+def render_steps(task: dict[str, Any], stops: bool) -> str:
+    """The right-hand column: every step, newest first, each page on one line.
+
+    A step's first line carries its number and display name; any further pages
+    in the same step follow it, indented, under their own titles.
+    """
+    rows = []
+    for step in task["steps"]:
+        lines = []
+        for i, page in enumerate(step["pages"]):
+            first = i == 0
+            label = step["title"] if first else page["title"]
+            # A one-page task's line repeats its own link on the left, so it is
+            # neither a stop for the arrow keys nor a second tab stop.
+            attrs = page_attrs(page, step_hay(step)) if stops else ' tabindex="-1"'
+            cls = ("pg it" if stops else "pg") + ("" if first else " sub")
+            lines.append(
+                f'<a class="{cls}" href="/page/{quote(page["rel"])}"'
+                f' title="{html_escape(page["detail"], quote=True)}"{attrs}>'
+                f'<span class="snum">{html_escape(step["num"]) if first else ""}</span>'
+                f'<span class="stitle">{html_escape(label)}</span>'
+                f'<span class="meta">{page_meta(page)}</span></a>'
+            )
+        rows.append(f'<li class="step">{"".join(lines)}</li>')
+    return f'<ol class="steps">{"".join(rows)}</ol>'
+
+
+def render_task_row(task: dict[str, Any]) -> str:
+    """One task: the task on the left, its steps and their pages on the right."""
+    pages, steps = task["pages"], task["steps"]
+    number = task["number"]
+    num = f'<span class="num">{number}</span>' if number is not None else ""
+    name = f'<span class="tname">{html_escape(task["name"])}</span>'
+    task_hay = " ".join([str(number) if number is not None else "", task["name"],
+                         task["task_dir"], task["area"]])
+    # The summary line may break only at its dots, never inside "10 Sep".
+    when = (f' &middot; {html_escape(task["date"]).replace(" ", "&nbsp;")}'
+            if task["date"] else "")
+
+    if len(pages) == 1:
+        # Nothing to map: the task link opens the page itself.
+        head = (f'<a class="tlink it" href="{task["href"]}"'
+                f'{page_attrs(pages[0], task_hay + " " + step_hay(steps[0]))}>{num}{name}</a>')
+        return (f'<article class="task single"><div class="tside">{head}'
+                f'<div class="tmeta">One&nbsp;page{when}</div></div>'
+                f'{render_steps(task, stops=False)}</article>')
+
+    counts = (f'{len(steps)}&nbsp;step{"" if len(steps) == 1 else "s"} &middot; '
+              f'{len(pages)}&nbsp;pages')
+    head = (f'<a class="tlink" href="{task["href"]}"'
+            f' data-hay="{html_escape(task_hay.lower(), quote=True)}">{num}{name}</a>')
+    # The date gets its own line here: beside the counts it no longer fits the
+    # column and would leave a dot hanging at the end of the first line.
+    changed = (f'<div class="tmeta">Changed {html_escape(task["date"]).replace(" ", "&nbsp;")}</div>'
+               if task["date"] else "")
+    return (f'<article class="task"><div class="tside">{head}'
+            f'<div class="tmeta">Task&nbsp;page &middot; '
+            f'<span class="gc" data-all="{counts}">{counts}</span></div>{changed}</div>'
+            f'{render_steps(task, stops=True)}</article>')
 
 
 def render_chips(pages: list[dict[str, Any]]) -> str:
@@ -847,51 +1293,33 @@ def render_index() -> bytes:
     for page in pages:
         page["recent"] = page["mtime"] >= cutoff
         page["date"] = stamp(page["mtime"], now)
-
-    # Pages are already sorted area-major, newest task first, so consecutive
-    # runs of the same task are exactly the groups we want.
-    groups: list[tuple[tuple[str, str], list[dict[str, Any]]]] = []
-    for page in pages:
-        key = (page["area"], page["task_dir"])
-        if not groups or groups[-1][0] != key:
-            groups.append((key, []))
-        groups[-1][1].append(page)
+    tasks = build_tasks(pages)
+    for task in tasks:
+        task["date"] = stamp(task["mtime"], now)
 
     sections: list[str] = []
     current_area = None
-    for (area, _task_dir), rows in groups:
-        if area != current_area:
+    for task in tasks:
+        if task["area"] != current_area:
             if current_area is not None:
                 sections.append("</section>")
             # `tasks/` is the main sequence and needs no announcement; anything
             # else gets a rule, so archived work is visibly set apart from live
             # work rather than blending into the end of the list.
             rule = (
-                f'<div class="divider">{html_escape(humanize(area))}</div>'
-                if area != CONTENT_DIRS[0] else ""
+                f'<div class="divider">{html_escape(humanize(task["area"]))}</div>'
+                if task["area"] != CONTENT_DIRS[0] else ""
             )
             sections.append(f'<section class="area">{rule}')
-            current_area = area
-
-        first = rows[0]
-        number = first["number"]
-        label = (
-            f'<span class="num">{html_escape(str(number))}</span>'
-            if number is not None else ""
-        )
-        items = "".join(render_row(page) for page in rows)
-        sections.append(
-            f'<section class="group"><div class="group-head">{label}'
-            f'<span class="group-name">{html_escape(first["task"])}</span>'
-            f'<span class="gc">{len(rows)}</span></div>'
-            f"<ul>{items}</ul></section>"
-        )
+            current_area = task["area"]
+        sections.append(render_task_row(task))
     if current_area is not None:
         sections.append("</section>")
 
-    listing = "".join(sections) or ""
+    listing = "".join(sections)
     count = len(pages)
-    plural = "" if count == 1 else "s"
+    summary = (f'{count} page{"" if count == 1 else "s"} in '
+               f'{len(tasks)} task{"" if len(tasks) == 1 else "s"}')
     folders = ", ".join(f"<code>{area}/</code>" for area in CONTENT_DIRS)
 
     body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -902,9 +1330,11 @@ def render_index() -> bytes:
 <div class="eyebrow">_askai</div>
 <h1>Workspace pages</h1>
 <p class="lede">Every HTML deliverable under {folders}, newest task first, served with
-Ask AI injected. Select any passage on a page to ask about it. Each page keeps its own
-threads and highlights in its own database sitting next to the file, and answers are
-grounded in that task's working notes.</p>
+Ask AI injected. A task with more than one page opens a page of its own that maps its
+steps; the column to its right lists those steps and their pages, newest first. Select
+any passage on a page to ask about it. Each page keeps its own threads and highlights in
+its own database sitting next to the file, and answers are grounded in that task's
+working notes.</p>
 <p class="lede">Nothing here claims a task is finished: this workspace records no status
 anywhere, so the index does not invent one. Every count is read off the files - <b>notes</b>
 is how many <code>.md</code> files the model is given for that page (those beside it, plus
@@ -913,7 +1343,7 @@ it, and the date is the file's last-modified time.</p>
 <div class="search">
 <label class="field" for="q">{SEARCH_ICON}<input id="q" type="search" autocomplete="off"
 spellcheck="false" placeholder="Filter by task, step, title, or path"><kbd>/</kbd></label>
-<div class="status"><span id="count">{count} page{plural}</span>
+<div class="status"><span id="count" data-all="{summary}">{summary}</span>
 <span class="hint"><kbd>/</kbd> search <kbd>esc</kbd> clear <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move
 <kbd>enter</kbd> open</span></div>
 {render_chips(pages)}
@@ -925,23 +1355,49 @@ spellcheck="false" placeholder="Filter by task, step, title, or path"><kbd>/</kb
 
 
 def crumb_for(rel: str) -> dict[str, Any]:
-    """Breadcrumb data for the injected top bar.
+    """Breadcrumb data for the injected top bar: All pages / task / step / page.
 
-    Reuses the same parsing and title cache the index uses, so the bar and the
-    index can never disagree about which task a page belongs to.
+    Built from the same task and step records as the index and the task page,
+    so the three can never disagree about a name, a number or where a link goes.
     """
-    path = Path(rel)
-    parts = path.parts
-    task_dir = parts[1] if len(parts) > 1 else ""
-    match = TASK_FOLDER_RE.match(task_dir)
-    step = " / ".join(humanize(p) for p in parts[2:-1])
-    return {
-        "home_label": "All pages",
-        "badge": f"Task {match.group(1)}" if match else None,
-        "badge_note": humanize(match.group(2)) if match else None,
-        "sub": step,
-        "title": page_title(ROOT / rel),
+    parts = Path(rel).parts
+    crumb: dict[str, Any] = {"home_label": "All pages", "task": None, "step": None,
+                             "sub": "", "title": page_title(ROOT / rel)}
+    task = find_task("/".join(parts[:2])) if len(parts) >= 3 else None
+    if task is None:
+        return crumb
+    number = task["number"]
+    crumb["task"] = {
+        "num": f"Task {number}" if number is not None else "",
+        "name": task["name"],
+        # A one-page task has no page of its own: the page open now is the task.
+        "href": task["href"] if len(task["pages"]) > 1 else None,
+        "hint": "Every step of this task on one page",
     }
+    if len(parts) > 3:
+        step = next((s for s in task["steps"] if s["dir"] == parts[2]), None)
+        if step:
+            main = step["main"]["rel"]
+            crumb["step"] = {
+                "num": step["num"],
+                # The name the step was given in _task.json, else its folder's.
+                "name": step["title"] if step["custom"] else step["name"],
+                "href": ("/page/" + quote(main)) if main != rel else None,
+                "hint": "This step's main page",
+            }
+        crumb["sub"] = " / ".join(humanize(p) for p in parts[3:-1])
+    return crumb
+
+
+def script_json(value: Any) -> str:
+    """JSON that is safe inside a <script> element.
+
+    Step names are typed in the browser now, and a name containing "</script>"
+    must not be able to end the element it is embedded in.
+    """
+    return (json.dumps(value)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
 
 INJECTION = (
     '<link rel="stylesheet" href="/_askai/askai.css">\n'
@@ -952,8 +1408,8 @@ INJECTION = (
 def inject(html: bytes, rel: str) -> bytes:
     """Insert the Ask AI bundle just before </body> (or append if there is none)."""
     marker = (
-        f"<script>window.ASKAI_DOC = {json.dumps(rel)};"
-        f"window.ASKAI_CRUMB = {json.dumps(crumb_for(rel))};</script>\n"
+        f"<script>window.ASKAI_DOC = {script_json(rel)};"
+        f"window.ASKAI_CRUMB = {script_json(crumb_for(rel))};</script>\n"
     )
     blob = (marker + INJECTION).encode("utf-8")
     lowered = html.lower()
@@ -961,6 +1417,149 @@ def inject(html: bytes, rel: str) -> bytes:
     if at == -1:
         return html + blob
     return html[:at] + blob + html[at:]
+
+
+# ------------------------------------------------------------------ task page
+
+PENCIL = ('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/>'
+          '<path d="M13.5 6.5l4 4"/></svg>')
+
+FAVICON = ("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
+           "<text y='13' font-size='13'>&#9998;</text></svg>")
+
+
+def render_task(task: dict[str, Any]) -> bytes:
+    """A task's own page: every step as a card, grouped into columns, with the
+    arrows from `_task.json`.
+
+    The cards are drawn here, so the page reads without JavaScript. task.js
+    draws the arrows from where the cards actually land, keeps the page to one
+    screen, and handles renaming.
+    """
+    now = datetime.now()
+    plan = plan_task(task)
+    meta = task["meta"]
+    label_of = {s["dir"]: (s["num"] or s["name"]) for s in task["steps"]}
+    incoming: dict[str, list[dict[str, str]]] = {}
+    for arrow in plan["arrows"]:
+        incoming.setdefault(arrow["to"], []).append(arrow)
+
+    def card(step: dict[str, Any]) -> str:
+        main = step["main"]
+        tag = step["num"] or step["name"]
+        desc = (f'<p class="c-desc">{html_escape(step["description"])}</p>'
+                if step["description"] else "")
+        pages = ""
+        if len(step["pages"]) > 1:
+            links = "".join(
+                f'<li><a href="/page/{quote(p["rel"])}"'
+                f' title="{html_escape(p["detail"], quote=True)}">{html_escape(p["title"])}</a></li>'
+                for p in step["pages"])
+            pages = f'<ul class="c-pages" aria-label="Pages in this step">{links}</ul>'
+        # What each arrow into this card says, in words: read aloud always, and
+        # shown when the screen is too narrow to draw the arrows.
+        rel = ""
+        if step["dir"] in incoming:
+            items = "".join(
+                f'<li><b>From {html_escape(label_of[a["from"]])}:</b> '
+                f'{html_escape(a["label"] or "built on it")}</li>'
+                for a in incoming[step["dir"]])
+            rel = f'<ul class="c-rel">{items}</ul>'
+        # A renamed step still offers its page's own title on hover.
+        tip = main["title"] if step["custom"] else main["detail"]
+        return (
+            f'<article class="card" data-step="{html_escape(step["dir"], quote=True)}">'
+            f'<div class="c-head"><span class="c-num">{html_escape(tag)}</span>'
+            f'<span class="c-date">{html_escape(stamp(step["mtime"], now))}</span>'
+            f'<button type="button" class="c-ren" aria-label="Rename {html_escape(tag, quote=True)}"'
+            f' title="Rename">{PENCIL}</button></div>'
+            f'<a class="c-title" href="/page/{quote(main["rel"])}"'
+            f' title="{html_escape(tip, quote=True)}">{html_escape(step["title"])}</a>'
+            f'{desc}{pages}{rel}</article>'
+        )
+
+    columns = []
+    for number in range(1, plan["columns"] + 1):
+        groups = []
+        for group in plan["groups"]:
+            if group["column"] != number:
+                continue
+            head = ""
+            if group["title"] or group["description"]:
+                head = (f'<div class="g-head"><h2 class="g-t">{html_escape(group["title"])}</h2>'
+                        + (f'<p class="g-d">{html_escape(group["description"])}</p>'
+                           if group["description"] else "")
+                        + "</div>")
+            cards = "".join(card(step) for step in group["steps"])
+            groups.append(f'<section class="group" data-group="{html_escape(group["id"], quote=True)}">'
+                          f'{head}<div class="cards">{cards}</div></section>')
+        columns.append(f'<div class="col" data-col="{number}">{"".join(groups)}</div>')
+
+    steps_n, pages_n = len(task["steps"]), len(task["pages"])
+    counts = (f'{steps_n} step{"" if steps_n == 1 else "s"}, '
+              f'{pages_n} page{"" if pages_n == 1 else "s"}')
+    where = f"<code>{html_escape(task['rel'])}/{TASK_FILE}</code>"
+    if not plan["grid"]:
+        how = ("Each column is a group, newest step on top. An arrow runs from a step to a "
+               "later step that built on it, corrected it or replaced it, and its label says "
+               "which. Point at a step to see only its arrows.")
+    elif not meta or "_error" in meta:
+        how = (f"There is no {where} yet, so every step sits in one group, newest first, "
+               "with no arrows.")
+    else:
+        how = (f"{where} gives this task no groups or arrows yet, so every step sits in one "
+               "group, newest first.")
+    how += " The pencil on a card renames the step; its folder keeps its name."
+    warn = ""
+    if "_error" in meta:
+        warn = (f'<p class="tk-warn">{where} could not be read ({html_escape(meta["_error"])}), '
+                "so this is the default drawing. Fix the file and reload.</p>")
+
+    number = task["number"]
+    title = f"Task {number} · {task['name']}" if number is not None else task["name"]
+    crumb = {"home_label": "All pages", "step": None, "sub": "", "title": None,
+             "task": {"num": f"Task {number}" if number is not None else "",
+                      "name": task["name"], "href": None}}
+    data = {"task": task["rel"], "arrows": plan["arrows"]}
+    tag = f'<span class="tk-num">Task {number}</span>' if number is not None else ""
+    marker = ('<marker id="{id}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" '
+              'markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">'
+              '<path class="{cls}" d="M0 1L10 5L0 9z"/></marker>')
+
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html_escape(title)}</title>
+<link rel="icon" href="{FAVICON}">
+<link rel="stylesheet" href="/_askai/askai.css">
+<link rel="stylesheet" href="/_askai/task.css">
+</head><body class="tk"><div class="tk-wrap">
+<header class="tk-head">
+<div class="tk-h1">{tag}<h1>{html_escape(task["name"])}</h1><span class="tk-count">{counts}</span></div>
+<p class="tk-sub">{how}</p>
+</header>
+{warn}
+<main id="board" class="board" data-mode="{"grid" if plan["grid"] else "columns"}"
+ data-layout="columns" data-cols="{plan["columns"]}" style="--n:{plan["columns"]}">
+<div class="cols">{"".join(columns)}</div>
+<svg class="wires" aria-hidden="true"><defs>{marker.format(id="tk-mk", cls="mk")}{marker.format(id="tk-mk-on", cls="mk-on")}</defs></svg>
+<div class="labels" aria-hidden="true"></div>
+</main></div>
+<script type="application/json" id="task-data">{script_json(data)}</script>
+<script>window.ASKAI_BAR_ONLY = true; window.ASKAI_CRUMB = {script_json(crumb)};</script>
+<script src="/_askai/askai.js" defer></script>
+<script src="/_askai/task.js" defer></script>
+</body></html>"""
+    return body.encode("utf-8")
+
+
+def render_missing(rel: str) -> bytes:
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>No such task</title>
+<style>body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+padding:40px 20px;color:#1a1a18;background:#f7f7f5}}</style></head><body>
+<p>There is no task with pages at <code>{html_escape(rel)}</code>.
+<a href="/">All pages</a></p></body></html>"""
+    return body.encode("utf-8")
 
 
 # -------------------------------------------------------------------------- server
@@ -1006,6 +1605,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             self._send(render_index(), "text/html; charset=utf-8")
+            return
+
+        if path.startswith("/task/"):
+            self._task_page(path[len("/task/"):])
             return
 
         if path.startswith("/_askai/"):
@@ -1059,6 +1662,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = unquote(urlparse(self.path).path)
         data = self._read_json()
+
+        if path == "/api/task/rename":
+            self._rename(data)
+            return
+
         doc = resolve_doc(data.get("doc", ""))
         if not doc:
             self._json({"error": "unknown document"}, 400)
@@ -1074,6 +1682,36 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._json({"error": "not found"}, 404)
+
+    # -- task pages ---------------------------------------------------------
+
+    def _task_page(self, rel: str) -> None:
+        task = find_task(rel)
+        if task is None:
+            self._send(render_missing(rel), "text/html; charset=utf-8", 404)
+            return
+        if len(task["pages"]) == 1:
+            # A one-page task is that page; there is nothing to map.
+            self.send_response(302)
+            self.send_header("Location", task["href"])
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        self._send(render_task(task), "text/html; charset=utf-8")
+
+    def _rename(self, data: dict[str, Any]) -> None:
+        # This endpoint writes to disk, so it answers only pages this proxy
+        # served: a JSON body, which a cross-site form cannot send, and, when the
+        # browser names an origin, the same host that served the page.
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        origin = self.headers.get("Origin")
+        host = self.headers.get("Host") or ""
+        if ctype != "application/json" or (origin and urlparse(origin).netloc != host):
+            self._json({"error": "Renaming only works from a page this proxy served."}, 403)
+            return
+        status, body = rename_step(data.get("task", ""), data.get("step"), data.get("title"))
+        self._json(body, status)
 
     # -- /api/ask ---------------------------------------------------------
 

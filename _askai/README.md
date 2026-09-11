@@ -25,9 +25,11 @@ gets the feature for free and still opens fine from disk (just without the drawe
 
 ```
 _askai/
-  server.py     proxy, page index, serve-time injection
-  askai.css     drawer, highlights, tooltip
-  askai.js      selection, threads, highlights, streaming chat
+  server.py     proxy, page index, task pages, serve-time injection
+  askai.css     drawer, highlights, tooltip, top bar
+  askai.js      selection, threads, highlights, streaming chat, top bar
+  task.css      the task page
+  task.js       the task page: arrows, fitting one screen, renaming a step
 ```
 
 ## Per-page databases
@@ -58,6 +60,52 @@ prefer the notes when they disagree. The drawer footer names the files an answer
 
 Write the HTML anywhere under `tasks/`, put its notes in the same folder, and restart the server.
 Nothing else.
+
+## Tasks, steps and `_task.json`
+
+The index at `/` has one row per task, newest task first.
+A task with more than one page links to a page of its own at `/task/<area>/<task>/`, for example `/task/tasks/19.pricing/`.
+That page shows every step as a card, the groups as columns, and arrows between steps that build on each other.
+A one-page task links straight to its page.
+The column to the right of each task lists its steps and their pages, newest first.
+Newest means the highest number, so the order never changes when an old file is edited.
+
+Everything a folder name cannot say lives in one small file in the task folder, `_task.json`:
+
+```json
+{
+  "groups": [
+    {"id": "sell", "title": "What we sell", "description": "The price list", "column": 1}
+  ],
+  "steps": {
+    "19-15.one-price-list": {
+      "title": "One price list",
+      "description": "Both modules on one page",
+      "group": "sell"
+    }
+  },
+  "arrows": [
+    {"from": "19-04.packages", "to": "19-15.one-price-list", "label": "three price pages made one"}
+  ]
+}
+```
+
+- Every field is optional.
+  With no file the task page still draws: one group, newest step first, each step titled by its page's `<title>`, no arrows.
+- `steps` is keyed by folder name.
+  `title` is the name shown in the list, on the task page and in the top bar; `description` is a few words.
+- `column` counts from 1.
+  Groups that share a column stack in the order listed.
+  Leave it out and each group gets a column of its own.
+- An arrow runs from a step to a later step that built on it, corrected it or replaced it.
+  Its label says which, in a few words.
+- A step the file does not place lands in a "Not in a group yet" column, so a missing entry shows.
+- The pencil on a card renames the step: the proxy rewrites only that step's `title`, atomically.
+  Folder names never change, because deploy scripts, `_tasks.md`, links between pages and the thread database beside every page all depend on them.
+
+The top bar on every page reads `All pages / Task 19 · Pricing / 19-15 · One price list / page title`.
+The task links to its task page.
+The step shows its number as written in its folder name, and its name from `_task.json`, falling back to the folder name.
 
 ## Notes
 

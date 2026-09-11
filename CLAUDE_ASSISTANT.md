@@ -114,6 +114,7 @@ When it says `non-technical`:
 - Each step folder contains its own `.md` notes and (when there's a deliverable) an `index.html`
 - A new task → a new numbered task folder. A new round of work on an existing task → a new numbered step folder inside it, not a new task.
 - Do not create new tasks on your own initiative — only when the user asks for one.
+- **Whenever a new step is added to a task, add it to that task's `_task.json` in the same turn**: a display title, a few-word description, its group, and arrows to the steps it builds on, corrects or replaces, each with a short plain label. The Ask AI proxy draws the task's own page from that file (`/task/tasks/NN.task/`); a step missing from it lands in a "Not in a group yet" column. Rename a step by changing its `title` there, never its folder. Format: `_askai/README.md`.
 
 ### Folder conventions inside a step
 - **`source-code/`** — source materials/assets the user provides, plus helper scripts (JS etc.) the user may want to re-run. Not a dump for intermediate work.

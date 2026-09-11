@@ -1,0 +1,159 @@
+/* Task page - served by _askai/server.py at /task/<area>/<task>/.
+
+   One screen: each group is a column, one card per step, newest on top, and
+   task.js draws the arrows between cards from where the cards really are.
+   The palette is the workspace list's, so the two read as one place. */
+
+:root{
+  --bg:#f7f7f5; --surface:#fff; --panel:#fff; --border:#e3e3de; --border-strong:#cfcfc8;
+  --copy:#1a1a18; --muted:#55554f; --subtle:#85857e; --primary:#b5541f; --on-primary:#fff;
+  --chip:#efefe9; --wire:#a3a39b; --err:#b42318;
+  --gap:clamp(96px, 9vw, 150px);
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,ui-sans-serif,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#17171a; --surface:#1f1f23; --panel:#1f1f23; --border:#33333a; --border-strong:#46464e;
+    --copy:#ececea; --muted:#b8b8b2; --subtle:#8f8f89; --primary:#e08050; --on-primary:#17171a;
+    --chip:#2a2a30; --wire:#686871; --err:#f97066;
+  }
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--bg)}
+body.tk{margin:0; background:var(--bg); color:var(--copy); font-family:var(--sans);
+  line-height:1.45; -webkit-text-size-adjust:100%}
+.tk-wrap{padding:14px 20px 16px}
+
+/* ---------- header ---------- */
+.tk-head{margin:0 0 14px}
+.tk-h1{display:flex; align-items:baseline; gap:6px 10px; flex-wrap:wrap}
+.tk-num{font-family:var(--mono); font-size:12px; font-weight:600; color:var(--muted);
+  background:var(--chip); padding:.18em .5em; border-radius:5px}
+.tk-h1 h1{margin:0; font-size:22px; line-height:1.2; font-weight:660; letter-spacing:-.02em}
+.tk-count{font-family:var(--mono); font-size:11px; color:var(--subtle)}
+.tk-sub{margin:5px 0 0; max-width:130ch; font-size:12.5px; color:var(--muted)}
+.tk-sub code{font-family:var(--mono); font-size:.92em}
+.tk-warn{margin:0 0 12px; padding:8px 12px; border:1px solid var(--err); border-radius:8px;
+  color:var(--err); font-size:12.5px}
+
+/* ---------- columns, groups, cards ---------- */
+.board{position:relative}
+.cols{display:grid; grid-template-columns:repeat(var(--n, 1), minmax(0, 1fr));
+  column-gap:var(--gap); align-items:start}
+.col{display:flex; flex-direction:column; gap:18px; min-width:0}
+.group{min-width:0}
+.g-head{margin:0 0 7px}
+.g-t{margin:0; font-family:var(--mono); font-size:10.5px; font-weight:600;
+  letter-spacing:.12em; text-transform:uppercase; color:var(--subtle)}
+.g-d{margin:1px 0 0; font-size:11.5px; line-height:1.35; color:var(--muted)}
+.cards{display:flex; flex-direction:column; gap:10px}
+
+.card{position:relative; min-width:0; background:var(--panel); border:1px solid var(--border);
+  border-radius:10px; padding:8px 11px 9px; transition:border-color .15s}
+.card:hover, .card:focus-within, .card.rel{border-color:var(--primary)}
+.c-head{display:flex; align-items:center; gap:8px; min-height:20px;
+  font-family:var(--mono); font-size:10.5px; color:var(--subtle)}
+.c-num{color:var(--primary); font-weight:600}
+.c-title{display:block; margin-top:1px; font-size:13.5px; font-weight:600; line-height:1.3;
+  color:var(--copy); text-decoration:none; overflow-wrap:anywhere}
+/* The title is the card's link, stretched over the whole card; the rename
+   button and a step's page links sit above the stretch. */
+.c-title::after{content:""; position:absolute; inset:0; border-radius:10px}
+.c-title:focus-visible{outline:none}
+.card:has(.c-title:focus-visible){outline:2px solid var(--primary); outline-offset:2px}
+.c-desc{margin:2px 0 0; font-size:12px; line-height:1.35; color:var(--muted)}
+
+.c-ren{position:relative; z-index:1; margin-left:auto; width:22px; height:22px; padding:0;
+  display:grid; place-items:center; border:0; border-radius:6px; background:none;
+  color:var(--subtle); cursor:pointer; opacity:.5; transition:opacity .15s}
+.c-ren svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2;
+  stroke-linecap:round; stroke-linejoin:round}
+.card:hover .c-ren, .card:focus-within .c-ren{opacity:1}
+.c-ren:hover, .c-ren:focus-visible{background:var(--chip); color:var(--copy); outline:none}
+
+.c-pages{list-style:none; margin:5px 0 0; padding:0; display:flex; flex-direction:column; gap:1px}
+.c-pages a{position:relative; z-index:1; display:block; font-size:11.5px; color:var(--muted);
+  text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.c-pages a::before{content:"\2192\00a0"; color:var(--subtle)}
+.c-pages a:hover{color:var(--primary); text-decoration:underline}
+
+/* What each arrow into a card says, written into the card: read aloud always,
+   shown only when there is no room to draw the arrows themselves. */
+.c-rel{list-style:none; margin:6px 0 0; padding:0; font-size:11.5px; line-height:1.35;
+  color:var(--muted); position:absolute; width:1px; height:1px; overflow:hidden;
+  clip-path:inset(50%); white-space:nowrap}
+.c-rel li + li{margin-top:2px}
+.c-rel b{font-family:var(--mono); font-weight:600; color:var(--primary)}
+
+/* ---------- renaming ---------- */
+.c-form{position:relative; z-index:2; margin-top:4px}
+.c-input{width:100%; font:inherit; font-size:13px; font-weight:600; color:var(--copy);
+  background:var(--surface); border:1px solid var(--primary); border-radius:6px;
+  padding:5px 7px; outline:none}
+.c-actions{display:flex; gap:6px; margin-top:6px}
+.c-actions button{font-family:var(--mono); font-size:10.5px; padding:4px 9px; border-radius:6px;
+  cursor:pointer; border:1px solid var(--border-strong); background:var(--chip); color:var(--copy)}
+.c-actions .c-save{background:var(--primary); border-color:var(--primary); color:var(--on-primary)}
+.c-actions button:disabled{opacity:.5; cursor:default}
+.c-msg{margin:6px 0 0; font-size:11.5px; line-height:1.35; color:var(--muted)}
+.c-msg.err{color:var(--err)}
+.card.saved{animation:tk-saved 1.4s ease-out}
+@keyframes tk-saved{
+  0%{box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 45%, transparent)}
+  100%{box-shadow:0 0 0 0 transparent}
+}
+
+/* ---------- arrows ---------- */
+.wires{position:absolute; left:0; top:0; width:100%; height:100%; overflow:visible;
+  pointer-events:none}
+.wire{fill:none; stroke:var(--wire); stroke-width:1.4; transition:opacity .15s}
+.wire.on{stroke:var(--primary); stroke-width:2}
+.mk{fill:var(--wire)}
+.mk-on{fill:var(--primary)}
+.board.focus .wire:not(.on){opacity:.14}
+.labels{position:absolute; inset:0; pointer-events:none}
+.w-label{position:absolute; width:max-content; padding:1px 4px; border-radius:4px;
+  font-size:10.5px; line-height:1.25; text-align:center; text-wrap:balance; color:var(--muted);
+  background:var(--bg); transition:opacity .15s}
+.w-label.on{color:var(--primary); font-weight:600}
+.board.focus .w-label:not(.on){opacity:.2}
+
+/* ---------- keeping it on one screen ---------- */
+/* task.js steps down through these until the page stops scrolling. */
+.board.compact .card{padding:6px 10px 7px}
+.board.compact .cards{gap:7px}
+.board.compact .col{gap:12px}
+.board.compact .c-desc{display:-webkit-box; -webkit-line-clamp:1; line-clamp:1;
+  -webkit-box-orient:vertical; overflow:hidden}
+.board.tight .c-desc{display:none}
+
+/* ---------- one group and nothing to connect: a plain grid ---------- */
+.board[data-mode="grid"] .cols{display:block}
+.board[data-mode="grid"] .cards{display:grid; gap:10px; align-items:start;
+  grid-template-columns:repeat(auto-fill, minmax(230px, 1fr))}
+
+/* ---------- too narrow for columns: one list, arrows written in the cards ---------- */
+.board[data-layout="stack"] .cols, .board[data-layout="stack"] .col{display:block}
+.board[data-layout="stack"] .group{margin:0 0 20px}
+.board[data-layout="stack"] .wires, .board[data-layout="stack"] .labels{display:none}
+.board[data-layout="stack"] .c-rel{position:static; width:auto; height:auto; overflow:visible;
+  clip-path:none; white-space:normal}
+
+@media (max-width:760px){
+  .tk-wrap{padding:12px 16px 24px}
+  .cols, .col{display:block}
+  .group{margin:0 0 20px}
+  .wires, .labels{display:none}
+  .c-rel{position:static; width:auto; height:auto; overflow:visible; clip-path:none;
+    white-space:normal}
+  .c-ren{opacity:1}
+}
+@media (hover:none){
+  .c-ren{opacity:1}
+}
+@media print{
+  .c-ren{display:none}
+}

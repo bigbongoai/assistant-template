@@ -82,9 +82,9 @@ body.askai-resizing #askai-crumb{ transition:none }
 /* A published page is somebody else's HTML, and it may well style .sub, .num
    or .title for its own purposes. Those generic names would otherwise bleed
    into this bar - a host page's ".sub{margin:0 0 2.5rem}" shunts the step
-   label clean out of it. Reset every child first; the rules below are more
-   specific, so they still win. */
-#askai-crumb > *{
+   label clean out of it. Reset everything inside the bar first, nested spans
+   included; the rules below are more specific, so they still win. */
+#askai-crumb *{
   margin:0; padding:0; border:0; background:none; font:inherit; color:inherit;
   text-transform:none; letter-spacing:normal; text-indent:0; float:none;
   position:static; box-shadow:none; max-width:none; min-height:0;
@@ -105,24 +105,28 @@ body.askai-resizing #askai-crumb{ transition:none }
   stroke-linecap:round; stroke-linejoin:round;
 }
 #askai-crumb .sep{ color:var(--askai-subtle); flex:none }
-#askai-crumb .num{ font-family:var(--askai-mono); color:var(--askai-primary); flex:none }
-/* The spec's state, worded exactly as the index words it. */
-#askai-crumb .st{
-  flex:none; font-family:var(--askai-mono); font-size:9.5px; letter-spacing:.05em;
-  text-transform:uppercase; padding:3px 7px; border-radius:999px;
-  border:1px solid transparent;
+/* The task and the step: one element each, both reading "number · name", in
+   the home button's design. The title gives way first, then the step. */
+#askai-crumb .askai-pill{
+  display:inline-flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0;
+  padding:6px 10px; border-radius:8px; text-decoration:none; white-space:nowrap;
+  color:var(--askai-copy); background:var(--askai-panel);
+  border:1px solid var(--askai-border-strong);
+  transition:border-color .15s, color .15s, background .15s;
 }
-#askai-crumb .st-info{
-  color:var(--askai-primary); text-transform:none; letter-spacing:.02em;
-  background:color-mix(in srgb, var(--askai-primary) 14%, transparent);
-  border-color:color-mix(in srgb, var(--askai-primary) 30%, transparent);
+#askai-crumb .askai-step{ flex-shrink:3 }
+#askai-crumb a.askai-pill:hover{
+  border-color:var(--askai-primary); color:#fff; background:var(--askai-panel-2);
 }
+#askai-crumb .askai-pn{ flex:none; font-family:var(--askai-mono); color:var(--askai-primary) }
+#askai-crumb .askai-pd{ flex:none; color:var(--askai-subtle) }
+#askai-crumb .askai-pt{ min-width:0; overflow:hidden; text-overflow:ellipsis }
 #askai-crumb .sub{
   flex:none; color:var(--askai-subtle); min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 #askai-crumb .title{
-  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 
 /* ---------- highlights (live inside the host page's own content) ---------- */
@@ -296,7 +300,7 @@ body.askai-resizing{ user-select:none }
   /* Full-width drawer has no divider to drag, and the grip would sit over content. */
   #askai-grip{ display:none }
   /* Narrow screens keep the escape hatch; the spec title is the first thing to go. */
-  #askai-crumb .title, #askai-crumb .sep, #askai-crumb .st, #askai-crumb .sub{ display:none }
+  #askai-crumb .title, #askai-crumb .sep, #askai-crumb .askai-step, #askai-crumb .sub{ display:none }
   body.askai-open #askai-crumb{ right:0 }
 }
 

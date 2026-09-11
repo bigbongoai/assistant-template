@@ -102,28 +102,51 @@ var root = document.createElement("div");
 root.id = "askai-root";
 var CRUMB = window.ASKAI_CRUMB || {};
 
+function attr(s) { return esc(s).replace(/"/g, "&quot;"); }
+
+/* One element per level, every level in the same design: the task, then the
+ * step, each reading "number \u00b7 name". A level is a link only when it leads
+ * somewhere other than the page already open. */
+function pill(p, kind) {
+  var inner =
+    (p.num ? '<span class="askai-pn">' + esc(p.num) + '</span>' : '') +
+    (p.num && p.name ? '<span class="askai-pd">\u00b7</span>' : '') +
+    (p.name ? '<span class="askai-pt">' + esc(p.name) + '</span>' : '');
+  var cls = "askai-pill askai-" + kind;
+  return p.href
+    ? '<a class="' + cls + '" href="' + attr(p.href) + '"' +
+        (p.hint ? ' title="' + attr(p.hint) + '"' : '') + '>' + inner + '</a>'
+    : '<span class="' + cls + '">' + inner + '</span>';
+}
+
 /* The bar is whatever the server says it is, so this file carries no
  * assumptions about how a workspace names its folders. */
 function crumbHtml() {
-  var lead = "";
-  if (CRUMB.badge) {
-    lead = '<span class="num">' + esc(CRUMB.badge) + '</span>' +
-           (CRUMB.badge_note
-              ? '<span class="st st-info">' + esc(CRUMB.badge_note) + '</span>' : '') +
-           '<span class="sep">\u00b7</span>';
+  var sep = '<span class="sep">/</span>';
+  var home = CRUMB.home_label || "All pages";
+  var out = '<a class="home" href="/" title="' + attr(home) + '">' +
+              '<svg viewBox="0 0 24 24">' +
+                '<rect x="3" y="3" width="7" height="7" rx="1"/>' +
+                '<rect x="14" y="3" width="7" height="7" rx="1"/>' +
+                '<rect x="3" y="14" width="7" height="7" rx="1"/>' +
+                '<rect x="14" y="14" width="7" height="7" rx="1"/>' +
+              '</svg><span>' + esc(home) + '</span>' +
+            '</a>';
+  if (CRUMB.task) out += sep + pill(CRUMB.task, "task");
+  if (CRUMB.step) out += sep + pill(CRUMB.step, "step");
+  if (CRUMB.sub) out += sep + '<span class="sub">' + esc(CRUMB.sub) + '</span>';
+  /* The task page is its own last level, so it sends no title. */
+  if (CRUMB.title !== null) {
+    out += sep + '<span class="title">' + esc(CRUMB.title || document.title) + '</span>';
   }
-  var sub = CRUMB.sub
-    ? '<span class="sub">' + esc(CRUMB.sub) + '</span><span class="sep">\u00b7</span>' : '';
-  return '<a class="home" href="/" title="' + esc(CRUMB.home_label || "All pages") + '">' +
-           '<svg viewBox="0 0 24 24">' +
-             '<rect x="3" y="3" width="7" height="7" rx="1"/>' +
-             '<rect x="14" y="3" width="7" height="7" rx="1"/>' +
-             '<rect x="3" y="14" width="7" height="7" rx="1"/>' +
-             '<rect x="14" y="14" width="7" height="7" rx="1"/>' +
-           '</svg><span>' + esc(CRUMB.home_label || "All pages") + '</span>' +
-         '</a>' +
-         '<span class="sep">/</span>' + lead + sub +
-         '<span class="title">' + esc(CRUMB.title || document.title) + '</span>';
+  return out;
+}
+
+/* The task page draws its own content and borrows only the bar. */
+if (window.ASKAI_BAR_ONLY) {
+  root.innerHTML = '<div id="askai-crumb">' + crumbHtml() + '</div>';
+  document.body.appendChild(root);
+  return;
 }
 
 root.innerHTML =

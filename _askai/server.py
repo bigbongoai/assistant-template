@@ -1651,7 +1651,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # A spec page may request its own relative assets; serve them from specs/.
-        asset = resolve_asset(path)
+        asset = resolve_asset(path) or resolve_from_referring_page(
+            path, self.headers.get("Referer"))
         if asset:
             ctype = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
             self._send(asset.read_bytes(), ctype)
@@ -1772,6 +1773,40 @@ class Handler(BaseHTTPRequestHandler):
             add_message(db, thread_id, "assistant", answer)
         emit({"type": "done", "threadId": thread_id})
         self.close_connection = True
+
+
+def resolve_from_referring_page(path: str, referer: str | None) -> Path | None:
+    """Find a file that a page asked for by its address on another server.
+
+    A page built to live somewhere else loads its files by that server's
+    absolute path: 19-06 asks for /pricing/research2/vendor/tailwind.js, its
+    place on the CRM, and nothing is at that path here, so the page renders
+    blank. When a request misses and came from a page this proxy served, look
+    for the same trailing path inside that page's own folder, longest match
+    first. Only a file resolve_asset would already serve by its direct path
+    can come back this way, so nothing new becomes reachable.
+    """
+    if not referer:
+        return None
+    ref_path = unquote(urlparse(referer).path)
+    if not ref_path.startswith("/page/"):
+        return None
+    page_dir = (ROOT / ref_path[len("/page/"):]).parent.resolve()
+    try:
+        page_rel = page_dir.relative_to(ROOT)
+    except ValueError:
+        return None
+    parts = [p for p in path.split("/") if p]
+    for i in range(len(parts)):
+        found = resolve_asset("/" + str(page_rel / "/".join(parts[i:])))
+        if not found:
+            continue
+        try:
+            found.relative_to(page_dir)
+        except ValueError:
+            continue
+        return found
+    return None
 
 
 def resolve_asset(path: str) -> Path | None:

@@ -1820,6 +1820,14 @@ def resolve_asset(path: str) -> Path | None:
         return None
     if candidate.suffix.lower() in (".html", ".sqlite3", ".env", ".py"):
         return None
+    # The suffix test alone never caught a file named just ".env": to Python
+    # that name has no suffix at all, so /.env handed out the API key and
+    # /.git/config the repo's settings. Refuse anything inside a dot-folder or
+    # named with a leading dot, and the database's -wal and -shm side files.
+    if any(part.startswith(".") for part in candidate.relative_to(ROOT).parts):
+        return None
+    if ".sqlite3" in candidate.name.lower():
+        return None
     return candidate if candidate.is_file() else None
 
 

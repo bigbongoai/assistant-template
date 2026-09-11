@@ -861,7 +861,7 @@ INDEX_CSS = """
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--copy);font-family:var(--sans);
 padding:44px 20px 80px;line-height:1.6;-webkit-text-size-adjust:100%}
-.wrap{max-width:1100px;margin:0 auto}
+.wrap{margin:0}
 .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
 text-transform:uppercase;color:var(--subtle)}
 h1{font-size:30px;margin:10px 0 6px;font-weight:660;letter-spacing:-.02em}

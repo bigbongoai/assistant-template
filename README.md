@@ -151,6 +151,7 @@ Two things worth knowing: credentials in that file end up in a teammate's `.env`
 | `assistant.config.json` | Generic defaults. An `assistant.config.local.json` beside it (gitignored) overrides them for a team |
 | `_user.md` | Yours: your profile, your setup answers, your preferences and your own rules. Claude fills it in during setup, then keeps adding to it. Where it disagrees with the shared instructions, it wins |
 | `_tasks.md` | One paragraph per task, kept updated by Claude |
+| `_categories.json` | Your task categories and which task is in which. The index page draws its two columns from it and saves your drags to it, and Claude files each new task in it. It appears when you add your first category |
 | `tasks/` · `archive/` | Your work, active and archived. Each task folder has its own `CLAUDE.md` holding everything about that task |
 | `examples/` | Two worked examples of the conventions. Reference only |
 | `bin/r2` · `bin/archive` | Storage helper and archiver |

@@ -16,6 +16,7 @@ Every file has one owner, and only that owner edits it.
 | `CLAUDE_ASSISTANT.md` | How the workspace works: this file | The template; arrives by `git pull upstream main` |
 | `_user.md` | The person: profile, setup answers, preferences, personal rules | The person, and Claude on their behalf |
 | `_tasks.md` | One paragraph per task | Claude, for this workspace |
+| `_categories.json` | The task categories, and which task sits in which | The person, Claude on their behalf, and the index page when a task is dragged |
 | `_context/` | The organisation's background | The organisation |
 | `tasks/NN.name/CLAUDE.md` | Everything about one task, current position first | Claude, while working on that task |
 
@@ -131,6 +132,7 @@ When it says `non-technical`:
 ### Structure
 - **`tasks/`** - every task lives here in its own numbered folder, with its own `CLAUDE.md`
 - **`_tasks.md`** - one paragraph per task: what it is, where it stands, what is open
+- **`_categories.json`** - the task categories: each one's name, its side (Work or Private), its colour and one line saying what belongs in it, then which category every task is in. The index page draws its two columns from it and writes it when a task is dragged. Optional: without it every task shows as not sorted.
 - **`_user.md`** - the person: profile, setup answers, preferences and personal rules
 - **`_context/`** - background every task can draw on: the organisation, the people, standing facts. Read what is relevant there before asking the user for context they have already given. Its rules are in `_context/README.md`.
 
@@ -149,7 +151,7 @@ When it says `non-technical`:
 - Update it in the same turn whenever the task's position changes: a step delivered, a decision made, a number corrected, something deployed or taken down.
 - When something is corrected or replaced, keep it and label it where it stands, for example `**Replaced (2026-03-14, by the second quote below):**`, rather than deleting it or leaving it looking current. Claude treats a loaded file as instructions, so a stale conclusion that still looks current gets followed.
 - `_tasks.md` holds one paragraph per task, about 50-90 words: what it is, where it stands, what is open. It loads into every conversation, so the detail belongs in the task's `CLAUDE.md`, never there. Change the paragraph whenever the position changes.
-- Creating a task means creating three things in the same turn: its folder, its `CLAUDE.md`, and its paragraph in `_tasks.md`.
+- Creating a task means creating these in the same turn: its folder, its `CLAUDE.md`, its paragraph in `_tasks.md`, and, where `_categories.json` exists, its category there.
 - If a task folder is a git repository of its own (a submodule), never write inside it. Its details stay in its paragraph.
 - Step folders keep their own notes as before; only the task-level record lives in the task's `CLAUDE.md`.
 
@@ -163,7 +165,16 @@ When it says `non-technical`:
 @_tasks.md
 2. When discussing a specific task, read the entire task folder to get context. Its `CLAUDE.md` arrives with the first file you open there; start from its **Where this stands**.
 3. Record work, findings, and outputs in the appropriate step folder, then bring the task's `CLAUDE.md` and its paragraph in `_tasks.md` up to date.
-4. When a new task is created, create its folder, its `CLAUDE.md` and its paragraph in `_tasks.md` together.
+4. When a new task is created, create its folder, its `CLAUDE.md` and its paragraph in `_tasks.md` together, and file it in `_categories.json`.
+
+### Categories
+Only where `_categories.json` exists. If it is missing, say categories are not set up and do nothing unless asked.
+
+- Every task has a category. When you create a task, read each category's `holds` line, pick the closest, and add the task's folder name to `tasks`: `"37.task-categories": {"category": "projects"}`.
+- When nothing fits clearly, still pick the closest and add `"guess": true`. The index page draws a guess with a dotted bar until the person moves it or keeps it.
+- Say it in one line of your reply: "Filed under BigBongo." Never stop to ask, and never create a category unless the person asks for one.
+- "Move 29 to personal" means: change that task's entry and drop its `guess`. A new category needs a name, a side, the next unused colour and a `holds` line.
+- The index page writes this file whenever the person drags a task, so read it fresh right before changing it.
 
 ### Archiving finished tasks
 Only where `bin/archive` exists. If it is missing, say archiving is not set up in this workspace and do nothing.
@@ -185,7 +196,7 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 
 - **Every task ships a visual explainer, built with the `bb-visual-explainer` skill.** That is the default deliverable, not something to wait to be asked for. Invoke the skill before writing the page rather than hand-rolling a layout, and do not reach for a Tailwind CDN - it breaks the skill's zero-network-requests rule. Each step gets its own `index.html`; if the user asks for another round of info, create a new step folder with the next number and a new `index.html` rather than overwriting the previous one. Pair it with the Ask AI skill, which in this workspace is served by the shared proxy, so the page itself carries nothing.
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
-- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `CLAUDE_ASSISTANT.md`, `_user.md`, `_tasks.md`, `README.md`, `package.json`, etc.) and the `_context/` folder.
+- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `CLAUDE_ASSISTANT.md`, `_user.md`, `_tasks.md`, `_categories.json`, `README.md`, `package.json`, etc.) and the `_context/` folder.
 
 ## Working cycle: local first, deploy in the background
 

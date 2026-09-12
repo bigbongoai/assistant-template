@@ -7,15 +7,14 @@ ask about it, and the passage stays highlighted with its conversation attached.
 python3 _askai/server.py
 ```
 
-Then open <http://pa.lcl:1111/> for an index of every page in the workspace.
-`pa.lcl` is a local name for loopback; `setup.sh` tells you how to add it if it is missing,
-and <http://127.0.0.1:1111/> always works without it.
+Then open <http://127.0.0.1:1111/> for an index of every page in the workspace
+(<http://pa.lcl:1111/> works too).
 
 ## Why one server
 
-The alternative is a copy of the server inside every task that wants it. Copies drift and fight
-over ports. With one server, a page gets the feature simply by existing, and there is one place
-to fix a bug.
+Each task used to carry its own copy of an Ask AI server in `source-code/`. Three copies had
+already drifted apart and fought over ports. This replaces them: pages get the feature by
+existing, and there is one place to fix a bug.
 
 ## How it works
 
@@ -25,11 +24,14 @@ gets the feature for free and still opens fine from disk (just without the drawe
 
 ```
 _askai/
-  server.py     proxy, page index, task pages, serve-time injection
+  server.py     proxy, page index, task pages, serve-time injection, saving categories
+  index.css     the index page
+  index.js      the index page: columns, categories, steps in place, moving tasks
   askai.css     drawer, highlights, tooltip, top bar
   askai.js      selection, threads, highlights, streaming chat, top bar
   task.css      the task page
   task.js       the task page: arrows, fitting one screen, renaming a step
+  tests/        index.e2e.mjs: the index page in a real browser, on a throwaway workspace
 ```
 
 ## Per-page databases
@@ -37,7 +39,7 @@ _askai/
 Every HTML file owns its own SQLite file, sitting next to it:
 
 ```
-tasks/01.my-task/01-first-round/index.askai.sqlite3
+tasks/17.security-review-deck/17-01.build/index.askai.sqlite3
 ```
 
 Cross-document contamination is impossible by construction rather than by a filter some future
@@ -61,14 +63,45 @@ prefer the notes when they disagree. The drawer footer names the files an answer
 Write the HTML anywhere under `tasks/`, put its notes in the same folder, and restart the server.
 Nothing else.
 
+## The index page and `_categories.json`
+
+The index at `/` shows every task in two columns, one per side (Work and Private unless the file says otherwise), newest task first.
+Newest means the highest number, so the order never changes when an old file is edited.
+Each task is one line: a coloured bar for its category, its number and name, its newest step, its category and the date it last changed.
+A task with more than one page has an arrow that lists its steps and their pages in place; "Steps: All" opens every task.
+Hover a category button to see its tasks, click it to see only them, and drag a task onto a button, or click its category name, to move it.
+A task with no category sits under "Not sorted" above the columns; tasks in `archive/` and `examples/` get a section of their own below.
+Each column shows 50 tasks before folding the rest.
+
+The categories, and which task is in which, live in one file at the workspace root, `_categories.json`:
+
+```json
+{
+  "sides": [{"id": "work", "name": "Work"}, {"id": "private", "name": "Private"}],
+  "categories": [
+    {"id": "bigbongo", "name": "BigBongo", "side": "work", "color": "blue",
+     "holds": "Anything for the company"}
+  ],
+  "tasks": {
+    "19.pricing": {"category": "bigbongo"},
+    "29.astra-3d": {"category": "projects", "guess": true}
+  }
+}
+```
+
+- One file rather than a line in each task's `_task.json`, because a task that is its own git repository must never be written into, and it still needs a category.
+- `tasks` is keyed by task folder name. `guess` marks a task Claude filed without being sure; the page draws it with a dotted bar until it is moved or kept.
+- `color` is one of blue, amber, teal, rose, violet, green or slate. `holds` is the line Claude reads when it files a new task.
+- With no file, every task shows as not sorted, and the first category added from the page creates it.
+- The page writes the file through `POST /api/categories`, atomically, then draws what is on disk. Like the step rename, it only accepts a JSON body from a page this proxy served.
+- A file that does not parse is named at the top of the page and never written over.
+- `node _askai/tests/index.e2e.mjs` checks all of this in a real browser, against a throwaway copy of the workspace.
+
 ## Tasks, steps and `_task.json`
 
-The index at `/` has one row per task, newest task first.
-A task with more than one page links to a page of its own at `/task/<area>/<task>/`, for example `/task/tasks/19.pricing/`.
+A task with more than one page links from the index to a page of its own at `/task/<area>/<task>/`, for example `/task/tasks/19.pricing/`.
 That page shows every step as a card, the groups as columns, and arrows between steps that build on each other.
 A one-page task links straight to its page.
-The column to the right of each task lists its steps and their pages, newest first.
-Newest means the highest number, so the order never changes when an old file is edited.
 
 Everything a folder name cannot say lives in one small file in the task folder, `_task.json`:
 

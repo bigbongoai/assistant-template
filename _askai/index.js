@@ -1,0 +1,962 @@
+/* The index page at /. The server puts every task, its steps and pages, and the
+   categories in window.ASKAI_INDEX; this draws them and saves changes to
+   _categories.json through POST /api/categories. Nothing else is stored in the
+   browser except whether steps start open. */
+(function () {
+  'use strict';
+  var DATA = window.ASKAI_INDEX;
+  var TASKS_AREA = DATA.areas[0].id;
+  var STEPS_KEY = 'askai-index-steps';
+  /* Each column shows this many tasks before folding the older ones; below
+     that the page simply scrolls. */
+  var FOLD_AT = 50;
+  var REDUCE = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var CHEVRON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5"/></svg>';
+
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  var sides = DATA.sides, cats = DATA.categories, placed = {};
+  /* An unreadable _categories.json is shown, and never written over. */
+  var locked = !!DATA.error;
+  var tasks = DATA.tasks.slice();
+  var byId = {};
+  tasks.forEach(function (t) {
+    byId[t.id] = t;
+    if (t.area === TASKS_AREA && t.category) { placed[t.dir] = { category: t.category, guess: !!t.guess }; }
+  });
+
+  function readSteps() { try { return localStorage.getItem(STEPS_KEY) === 'all' ? 'all' : 'newest'; } catch (e) { return 'newest'; } }
+  function writeSteps() { try { localStorage.setItem(STEPS_KEY, stepsMode); } catch (e) { /* private window */ } }
+
+  var stepsMode = readSteps();
+  var flipped = {};
+  var sel = fromHash();
+  var query = '';
+  var unfolded = {};
+  var stops = [];
+  var cursorKey = null;
+  var dragId = null;
+  var toastTimer = null;
+  var menuFor = null;
+  var peekTest = null;
+
+  var bar = $('#bar'), board = $('#board'), focusEl = $('#focus'), q = $('#q'), countEl = $('#count'),
+    emptyEl = $('#empty'), menu = $('#menu'), toastEl = $('#toast'), looseEl = $('#unsorted'),
+    othersEl = $('#others'), noticeEl = $('#notice');
+  var holding = document.createDocumentFragment();
+
+  function catById(id) {
+    for (var i = 0; i < cats.length; i++) { if (cats[i].id === id) { return cats[i]; } }
+    return null;
+  }
+  function sortable(t) { return t.area === TASKS_AREA; }
+  function catOf(t) { var p = sortable(t) && placed[t.dir]; return p ? catById(p.category) : null; }
+  function isGuess(t) { var p = placed[t.dir]; return !!(sortable(t) && p && p.guess && catOf(t)); }
+  function sideName(id) {
+    for (var i = 0; i < sides.length; i++) { if (sides[i].id === id) { return sides[i].name; } }
+    return id;
+  }
+  function colorVar(c) { return c ? 'var(--cat-' + c.color + ')' : 'var(--cat-none)'; }
+  /* The order of the buttons, which is also what the ⌥ digits count. */
+  function orderedCats() {
+    var out = [];
+    sides.forEach(function (s) { cats.forEach(function (c) { if (c.side === s.id) { out.push(c); } }); });
+    return out;
+  }
+  function usedSides() { return sides.filter(function (s) { return cats.some(function (c) { return c.side === s.id; }); }); }
+  function label(t) { return (t.n !== null ? t.n + ' · ' : '') + t.name; }
+
+  /* ---------------------------------------------------------------- the URL */
+  function fromHash() {
+    var h = decodeURIComponent(location.hash.slice(1));
+    if (h.indexOf('side=') === 0) {
+      var s = h.slice(5);
+      if (sides.some(function (x) { return x.id === s; })) { return { kind: 'side', id: s }; }
+    }
+    if (h.indexOf('cat=') === 0) {
+      var ids = h.slice(4).split(',').filter(function (id) { return catById(id); });
+      if (ids.length) { return { kind: 'cats', ids: ids }; }
+    }
+    return { kind: 'all' };
+  }
+  function hashFor(s) {
+    if (s.kind === 'side') { return '#side=' + s.id; }
+    if (s.kind === 'cats') { return '#cat=' + s.ids.join(','); }
+    return location.pathname + location.search;
+  }
+  /* Every view has its own address, so Back returns to the previous view. */
+  function setSel(s) {
+    sel = s;
+    try { history.pushState(null, '', hashFor(s)); } catch (e) { /* file:// */ }
+    cursorKey = null;
+    render(true);
+  }
+  window.addEventListener('popstate', function () { sel = fromHash(); cursorKey = null; render(true); });
+
+  function inSel(t) {
+    var c = catOf(t);
+    if (sel.kind === 'side') { return !!c && c.side === sel.id; }
+    if (sel.kind === 'cats') { return !!c && sel.ids.indexOf(c.id) !== -1; }
+    return true;
+  }
+  function headHay(t) {
+    var c = catOf(t);
+    return ((t.n !== null ? t.n : '') + ' ' + t.name + ' ' + t.dir + ' ' + (c ? c.name : 'not sorted')).toLowerCase();
+  }
+  function stepHay(s) {
+    return (s.num + ' ' + s.title + ' ' + s.more.map(function (p) { return p.title; }).join(' ')).toLowerCase();
+  }
+  function matchesQuery(t) {
+    return !query || headHay(t).indexOf(query) !== -1 ||
+      t.steps.some(function (s) { return stepHay(s).indexOf(query) !== -1; });
+  }
+  function selLabel() {
+    if (sel.kind === 'side') { return sideName(sel.id); }
+    if (sel.kind === 'cats') { return sel.ids.map(function (id) { return catById(id).name; }).join(' + '); }
+    return 'All';
+  }
+
+  /* ----------------------------------------------------------------- steps */
+  /* "Steps: All" opens every task; a click then closes just that one, and the
+     reverse under "Newest only". Changing the setting forgets those clicks. */
+  function openable(t) { return t.pages > 1; }
+  function isOpen(t) { return openable(t) && (stepsMode === 'all' ? !flipped[t.id] : !!flipped[t.id]); }
+  /* A search that finds a task only through one of its steps opens the task
+     and shows just the steps that match. */
+  function stepsShown(t) {
+    if (query && openable(t) && headHay(t).indexOf(query) === -1) {
+      var hits = t.steps.filter(function (s) { return stepHay(s).indexOf(query) !== -1; });
+      if (hits.length) { return { open: true, steps: hits }; }
+    }
+    return { open: isOpen(t), steps: t.steps };
+  }
+  function lines(steps, cls) {
+    return steps.map(function (s) {
+      var html = '<li><a class="' + cls + '" draggable="false" href="' + esc(s.href) + '"><span class="snum">' +
+        esc(s.num) + '</span><span class="stitle">' + esc(s.title) + '</span><span class="meta">' +
+        (s.threads ? '<span class="thr">threads</span>' : '') + '</span></a></li>';
+      s.more.forEach(function (p) {
+        html += '<li><a class="' + cls + ' page" draggable="false" href="' + esc(p.href) + '"><span class="snum"></span>' +
+          '<span class="stitle">' + esc(p.title) + '</span><span class="meta">' +
+          (p.threads ? '<span class="thr">threads</span>' : '') + '</span></a></li>';
+      });
+      return html;
+    }).join('');
+  }
+  function paintSteps(t) {
+    var a = rows[t.id], list = $('.subs', a), shown = stepsShown(t);
+    a.classList.toggle('open', shown.open);
+    var tw = $('button.tw', a);
+    if (tw) {
+      tw.setAttribute('aria-expanded', shown.open);
+      tw.title = (shown.open ? 'Hide its steps (←)' : 'Show its steps (→)');
+    }
+    if (!shown.open) { list.hidden = true; list.innerHTML = ''; return; }
+    list.innerHTML = lines(shown.steps, 'sub');
+    list.hidden = false;
+  }
+  /* Open or close one task in place. The steps grow out of the line and the
+     tasks below slide down with them. */
+  function toggleSteps(id, want) {
+    var t = byId[id];
+    if (!openable(t) || !rows[id].isConnected) { return; }
+    var now = stepsShown(t).open;
+    if (want === undefined) { want = !now; }
+    if (want === now) { return; }
+    flipped[id] = !flipped[id];
+    var a = rows[id], list = $('.subs', a);
+    if (want) {
+      paintSteps(t);
+      if (!REDUCE) {
+        list.animate([{ height: '0px', opacity: 0 }, { height: list.scrollHeight + 'px', opacity: 1 }],
+          { duration: 200, easing: 'cubic-bezier(.2,.7,.2,1)' });
+      }
+      buildStops();
+      return;
+    }
+    if (REDUCE) { paintSteps(t); buildStops(); return; }
+    var h = list.offsetHeight;
+    a.classList.remove('open');
+    list.animate([{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }],
+      { duration: 160, easing: 'ease-in' }).onfinish = function () { paintSteps(t); buildStops(); };
+  }
+
+  /* ------------------------------------------------------------------ rows */
+  /* One element per task for the columns. They are moved, never rebuilt, so a
+     task can be seen sliding to its new place. */
+  var rows = {};
+  tasks.forEach(function (t) {
+    var s = t.steps[0], many = openable(t), movable = sortable(t);
+    var count = t.steps.length > 1 ? plural(t.steps.length, 'step') : plural(t.pages, 'page');
+    var a = document.createElement('article');
+    a.className = 'row' + (movable ? '' : ' plain');
+    a.dataset.id = t.id;
+    a.draggable = movable;
+    a.innerHTML =
+      (many ? '<button type="button" class="tw" aria-expanded="false">' + CHEVRON + '</button>' :
+        '<span class="tw" aria-hidden="true"></span>') +
+      '<a class="tl" draggable="false" href="' + esc(t.href) + '">' +
+      (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) + '</span></a>' +
+      '<a class="latest" draggable="false" tabindex="-1" href="' + esc(s.href) + '" title="Newest step: ' +
+      esc((s.num ? s.num + ' ' : '') + s.title) + '"><span class="snum">' + esc(s.num) + '</span><span class="stitle">' +
+      esc(s.title) + '</span></a>' +
+      (many ? '<button type="button" class="more" title="Show its steps">' + count + '</button>' :
+        '<span class="more" aria-hidden="true"></span>') +
+      (movable ? '<button type="button" class="cat" aria-haspopup="menu"><i class="dot"></i><span class="cn"></span></button>' : '') +
+      '<span class="date">' + esc(t.date) + '</span>' +
+      '<ol class="subs" hidden></ol>';
+    rows[t.id] = a;
+    holding.appendChild(a);
+  });
+  function paintRow(t) {
+    var a = rows[t.id], c = catOf(t), guess = isGuess(t);
+    a.style.setProperty('--cc', colorVar(c));
+    a.classList.toggle('guess', guess);
+    var btn = $('.cat', a);
+    if (btn) {
+      $('.cn', btn).textContent = c ? c.name + (guess ? ' ?' : '') : 'Not sorted';
+      btn.title = guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category';
+    }
+    paintSteps(t);
+  }
+
+  /* ------------------------------------------------------ category buttons */
+  function renderBar() {
+    var html = '<button type="button" class="chip all" data-all="1" title="Every task  (⌥0)">All <span class="c"></span></button>';
+    var i = 0;
+    usedSides().forEach(function (s) {
+      html += '<span class="sep" aria-hidden="true"></span><span class="grp">' +
+        '<button type="button" class="side" data-side="' + esc(s.id) + '" title="Only ' + esc(s.name) +
+        ', across the full width">' + esc(s.name) + ' <span class="c"></span></button>';
+      cats.forEach(function (c) {
+        if (c.side !== s.id) { return; }
+        i++;
+        html += '<button type="button" class="chip" data-cat="' + esc(c.id) + '" style="--cc:' + colorVar(c) +
+          '" title="' + esc((c.holds ? c.holds + '. ' : '') + 'Double-click to rename, right-click for more' +
+          (i < 10 ? '  (⌥' + i + ')' : '')) + '"><i class="dot"></i><span class="lbl">' + esc(c.name) +
+          '</span> <span class="c"></span></button>';
+      });
+      html += '</span>';
+    });
+    html += '<span class="sep" aria-hidden="true"></span><span class="addwrap">' +
+      '<button type="button" class="chip add" title="Add a category">+ New</button></span>';
+    bar.innerHTML = html;
+  }
+  function counts() {
+    var byCat = {}, bySide = {}, total = 0, loose = 0, other = 0;
+    cats.forEach(function (c) { byCat[c.id] = 0; });
+    sides.forEach(function (s) { bySide[s.id] = 0; });
+    tasks.forEach(function (t) {
+      if (!matchesQuery(t)) { return; }
+      total++;
+      var c = catOf(t);
+      if (c) { byCat[c.id]++; bySide[c.side]++; } else if (sortable(t)) { loose++; } else { other++; }
+    });
+    return { byCat: byCat, bySide: bySide, total: total, loose: loose, other: other };
+  }
+  function paintBar(k) {
+    $$('.chip[data-cat]', bar).forEach(function (b) {
+      var id = b.dataset.cat, n = k.byCat[id] || 0, on = sel.kind === 'cats' && sel.ids.indexOf(id) !== -1;
+      $('.c', b).textContent = n;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+      b.classList.toggle('zero', !!query && n === 0);
+    });
+    $$('.side', bar).forEach(function (b) {
+      var on = sel.kind === 'side' && sel.id === b.dataset.side;
+      $('.c', b).textContent = k.bySide[b.dataset.side] || 0;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+    });
+    var all = $('.chip.all', bar);
+    $('.c', all).textContent = k.total;
+    all.classList.toggle('on', sel.kind === 'all');
+    all.setAttribute('aria-pressed', sel.kind === 'all');
+  }
+
+  /* ---------------------------------------------------------------- render */
+  function render(animate) {
+    closeMenu(false);
+    var before = null;
+    if (animate && !REDUCE) {
+      before = new Map();
+      tasks.forEach(function (t) {
+        var r = rows[t.id];
+        if (r.isConnected && !r.hidden) { before.set(r, r.getBoundingClientRect()); }
+      });
+    }
+    tasks.forEach(paintRow);
+    var k = counts();
+    paintBar(k);
+    var shown = tasks.filter(function (t) { return inSel(t) && matchesQuery(t); });
+    var focusView = sel.kind !== 'all';
+    [board, looseEl, othersEl].forEach(function (el) { el.innerHTML = ''; });
+    tasks.forEach(function (t) { holding.appendChild(rows[t.id]); });
+    if (focusView) {
+      board.hidden = looseEl.hidden = othersEl.hidden = true;
+      focusEl.hidden = false;
+      renderFocus(shown, animate);
+    } else {
+      focusEl.hidden = true;
+      focusEl.innerHTML = '';
+      board.hidden = othersEl.hidden = false;
+      renderOverview(shown);
+    }
+    emptyEl.hidden = shown.length !== 0 || (!query && tasks.length !== 0);
+    countEl.textContent = describe(shown.length, k);
+    if (before) { flip(before); }
+    buildStops();
+    /* A pointer resting on a category button keeps showing that category,
+       including on anything this render has just drawn. */
+    if (peekTest) { peek(peekTest); }
+  }
+
+  function describe(n, k) {
+    if (sel.kind === 'all' && !query) {
+      var bits = [plural(tasks.length, 'task')];
+      usedSides().forEach(function (s) { bits.push(s.name + ' ' + (k.bySide[s.id] || 0)); });
+      if (k.loose) { bits.push(k.loose + ' not sorted'); }
+      return bits.join(' · ');
+    }
+    var parts = [n + ' of ' + plural(tasks.length, 'task')];
+    if (sel.kind !== 'all') { parts.push(selLabel()); }
+    if (query) { parts.push('"' + query + '"'); }
+    return parts.join(' · ');
+  }
+
+  /* One panel: a heading, its rows, and the line that folds what is past 50. */
+  function panel(key, head, list, emptyText) {
+    var col = document.createElement('section');
+    col.className = 'col';
+    col.innerHTML = '<header class="colhead">' + head + '</header><div class="rows"></div>';
+    var box = $('.rows', col);
+    list.forEach(function (t) { var r = rows[t.id]; r.hidden = false; box.appendChild(r); });
+    if (!list.length && emptyText) {
+      var none = document.createElement('p');
+      none.className = 'none';
+      none.textContent = emptyText;
+      col.appendChild(none);
+    }
+    var fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'fold';
+    fold.hidden = true;
+    fold.dataset.key = key;
+    col.appendChild(fold);
+    return col;
+  }
+
+  function renderOverview(shown) {
+    var loose = shown.filter(function (t) { return sortable(t) && !catOf(t); });
+    looseEl.hidden = !loose.length;
+    if (loose.length) {
+      looseEl.appendChild(panel('loose', '<span class="colname">Not sorted</span><span class="c">' + loose.length +
+        '</span><span class="note">' + (cats.length ? 'Drag each onto a category, or click "Not sorted" on it'
+          : 'Add a category with + New, then drag tasks onto it') + '</span>', loose));
+    }
+    var used = usedSides();
+    board.style.setProperty('--cols', Math.max(1, used.length));
+    used.forEach(function (s) {
+      var mine = shown.filter(function (t) { var c = catOf(t); return c && c.side === s.id; });
+      var legend = cats.filter(function (c) { return c.side === s.id; }).map(function (c) {
+        return '<span class="lg" data-cat="' + esc(c.id) + '" style="--cc:' + colorVar(c) + '" title="Only ' +
+          esc(c.name) + '"><i class="dot"></i>' + esc(c.name) + '</span>';
+      }).join('');
+      var col = panel('s:' + s.id, '<button type="button" class="sidebtn" data-side="' + esc(s.id) + '" title="Only ' +
+        esc(s.name) + ', across the full width">' + esc(s.name) + '</button><span class="c">' + mine.length +
+        '</span><span class="legend">' + legend + '</span>', mine, query ? 'Nothing here matches.' : 'No tasks yet.');
+      col.dataset.side = s.id;
+      board.appendChild(col);
+    });
+    board.hidden = !used.length;
+    DATA.areas.slice(1).forEach(function (area) {
+      var mine = shown.filter(function (t) { return t.area === area.id; });
+      if (!mine.length) { return; }
+      var wrap = document.createElement('section');
+      wrap.className = 'area';
+      wrap.innerHTML = '<div class="divider">' + esc(area.name) + '</div>';
+      wrap.appendChild(panel('a:' + area.id, '<span class="colname">' + esc(area.name) + '</span><span class="c">' +
+        mine.length + '</span>', mine));
+      othersEl.appendChild(wrap);
+    });
+    foldColumns();
+  }
+
+  function foldColumns() {
+    $$('main .col').forEach(function (col) {
+      var fold = $('.fold', col);
+      if (!fold) { return; }
+      var key = fold.dataset.key, rs = $$('.row', $('.rows', col)), extra = rs.length - FOLD_AT;
+      rs.forEach(function (r, i) { r.hidden = extra > 0 && !unfolded[key] && i >= FOLD_AT; });
+      fold.hidden = extra <= 0;
+      if (extra > 0) {
+        fold.textContent = unfolded[key] ? 'Fold the ' + extra + ' older task' + (extra === 1 ? '' : 's') + ' ▴' :
+          extra + ' earlier task' + (extra === 1 ? '' : 's') + ' ▾';
+      }
+    });
+  }
+
+  function renderFocus(shown, animate) {
+    var dots = sel.kind === 'cats' ? sel.ids.map(function (id) {
+      return '<i class="dot" style="--cc:' + colorVar(catById(id)) + '"></i>';
+    }).join('') : '';
+    var html = '<div class="fhead">' + dots + '<b>' + esc(selLabel()) + '</b><span class="c">' + plural(shown.length, 'task') +
+      '</span><button type="button" class="back">Both columns <kbd>esc</kbd></button></div>';
+    shown.forEach(function (t) {
+      var c = catOf(t), guess = isGuess(t);
+      var size = t.steps.length > 1 ? plural(t.steps.length, 'step') + ' · ' + plural(t.pages, 'page') :
+        (t.pages > 1 ? plural(t.pages, 'page') : 'One page');
+      html += '<article class="card' + (guess ? ' guess' : '') + '" data-id="' + esc(t.id) + '" draggable="true" style="--cc:' +
+        colorVar(c) + '"><div class="cside"><a class="tl" draggable="false" href="' + esc(t.href) + '">' +
+        (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) +
+        '</span></a><div class="tmeta"><button type="button" class="cat" aria-haspopup="menu" title="' +
+        (guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category') + '"><i class="dot"></i>' +
+        '<span class="cn">' + esc(c.name + (guess ? ' ?' : '')) + '</span></button><span>' + size + '</span><span>Changed ' +
+        esc(t.date) + '</span></div></div><ol class="steps">' + lines(t.steps, 'pg') + '</ol></article>';
+    });
+    if (!shown.length && !query) {
+      html += '<p class="none">No tasks in ' + esc(selLabel()) + ' yet. Drag one onto its button.</p>';
+    }
+    focusEl.innerHTML = html;
+    if (animate && !REDUCE) {
+      $$('.card', focusEl).slice(0, 14).forEach(function (card, i) {
+        card.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+          { duration: 180, delay: i * 14, easing: 'ease-out', fill: 'backwards' });
+      });
+    }
+  }
+
+  /* Moved rows slide from where they were to where they are now. */
+  function flip(before) {
+    tasks.forEach(function (t) {
+      var r = rows[t.id];
+      if (!r.isConnected || r.hidden) { return; }
+      var b = before.get(r), a = r.getBoundingClientRect();
+      if (!b) {
+        r.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' });
+        return;
+      }
+      var dx = b.left - a.left, dy = b.top - a.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) { return; }
+      r.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px)' }, { transform: 'none' }],
+        { duration: 260, easing: 'cubic-bezier(.2,.7,.2,1)' });
+    });
+  }
+
+  /* ---------------------------------------------------------- the keyboard */
+  /* The cursor remembers which task, and which of its pages, it is on - not a
+     position in a list - so opening a task never makes it jump. */
+  function holderOf(el) { return el.closest('[data-id]'); }
+  function keyOf(el) {
+    return { id: holderOf(el).dataset.id, href: el.classList.contains('tl') ? null : el.getAttribute('href') };
+  }
+  function elOf(k) {
+    if (!k) { return null; }
+    for (var i = 0; i < stops.length; i++) {
+      var e = stops[i];
+      if (holderOf(e).dataset.id !== k.id) { continue; }
+      if (k.href === null ? e.classList.contains('tl') : (!e.classList.contains('tl') && e.getAttribute('href') === k.href)) {
+        return e;
+      }
+    }
+    return null;
+  }
+  function buildStops() {
+    stops = focusEl.hidden ?
+      $$('main .col .row:not([hidden]) .tl, main .col .row:not([hidden]) .subs:not([hidden]) .sub') :
+      $$('.card .tl, .card .pg', focusEl);
+    if (cursorKey && !elOf(cursorKey) && cursorKey.href !== null) { cursorKey = { id: cursorKey.id, href: null }; }
+    if (cursorKey && !elOf(cursorKey)) { cursorKey = null; }
+    if (!cursorKey && query && stops.length) { cursorKey = keyOf(stops[0]); }
+    paintCursor(false);
+  }
+  function paintCursor(scroll) {
+    $$('.row.on, .card.on, .sub.on, .pg.on').forEach(function (e) { e.classList.remove('on'); });
+    var el = elOf(cursorKey);
+    if (!el) { return; }
+    var target = el.classList.contains('tl') ? holderOf(el) : el;
+    target.classList.add('on');
+    if (scroll) { target.scrollIntoView({ block: 'nearest' }); }
+  }
+  function moveCursor(step) {
+    if (!stops.length) { return; }
+    var i = stops.indexOf(elOf(cursorKey));
+    i = i < 0 ? (step > 0 ? 0 : stops.length - 1) : (i + step + stops.length) % stops.length;
+    cursorKey = keyOf(stops[i]);
+    paintCursor(true);
+  }
+  /* → opens the task under the cursor, or steps into it when it is already
+     open; ← steps back out to the task, then closes it. */
+  function arrow(dir) {
+    var el = elOf(cursorKey);
+    if (!el) {
+      if (stops.length) { cursorKey = keyOf(stops[0]); paintCursor(true); }
+      return;
+    }
+    var holder = holderOf(el), id = holder.dataset.id, onTask = el.classList.contains('tl');
+    if (dir > 0) {
+      if (!onTask) { return; }
+      var first = holder.classList.contains('card') ? $('.pg', holder) : null;
+      if (!first && holder.classList.contains('open')) { first = $('.subs:not([hidden]) .sub', holder); }
+      if (first) { cursorKey = keyOf(first); paintCursor(true); return; }
+      toggleSteps(id, true);
+      return;
+    }
+    if (!onTask) { cursorKey = { id: id, href: null }; paintCursor(true); return; }
+    if (holder.classList.contains('open')) { toggleSteps(id, false); }
+  }
+
+  /* -------------------------------------------------------------- the menu */
+  function openMenu(anchor, items) {
+    menu.innerHTML = items.map(function (it, i) {
+      if (it.heading) { return '<div class="mh">' + esc(it.heading) + '</div>'; }
+      return '<button type="button" role="menuitem" data-i="' + i + '"' + (it.disabled ? ' disabled' : '') +
+        (it.color ? ' style="--cc:var(--cat-' + it.color + ')"' : '') + '>' +
+        (it.color ? '<i class="dot"></i>' : '<span class="ic">' + (it.icon || '') + '</span>') +
+        '<span>' + esc(it.label) + '</span>' + (it.note ? '<span class="note">' + esc(it.note) + '</span>' : '') + '</button>';
+    }).join('');
+    menu.hidden = false;
+    menuFor = { anchor: anchor, items: items };
+    var r = anchor.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var left = Math.min(r.left, window.innerWidth - mw - 8), top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) { top = Math.max(8, r.top - mh - 6); }
+    menu.style.left = Math.max(8, left) + 'px';
+    menu.style.top = top + 'px';
+    var first = $('button:not([disabled])', menu);
+    if (first) { first.focus({ preventScroll: true }); }
+  }
+  function closeMenu(restore) {
+    if (menu.hidden) { return; }
+    menu.hidden = true;
+    var a = menuFor && menuFor.anchor;
+    menuFor = null;
+    if (restore && a && a.isConnected) { a.focus(); }
+  }
+  menu.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-i]');
+    if (!b || !menuFor) { return; }
+    var it = menuFor.items[+b.dataset.i];
+    closeMenu(false);
+    it.action();
+  });
+  menu.addEventListener('keydown', function (e) {
+    var bs = $$('button:not([disabled])', menu), i = bs.indexOf(document.activeElement);
+    if (!bs.length) { if (e.key === 'Escape') { closeMenu(true); } return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeMenu(true); }
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (!menu.hidden && !menu.contains(e.target)) { closeMenu(false); }
+  });
+
+  function moveMenu(id, anchor) {
+    var t = byId[id], cur = catOf(t), items = [];
+    if (isGuess(t)) {
+      items.push({ label: 'Keep in ' + cur.name, icon: '✓', note: "Claude's guess", action: function () { keepTask(id); } });
+    }
+    usedSides().forEach(function (s) {
+      items.push({ heading: 'Move to · ' + s.name });
+      cats.forEach(function (c) {
+        if (c.side !== s.id) { return; }
+        var here = !!cur && c.id === cur.id;
+        items.push({ label: c.name, color: c.color, disabled: here, note: here ? 'here now' : '',
+          action: function () { moveTask(id, c.id); } });
+      });
+    });
+    if (!cats.length) { items.push({ label: 'No categories yet: add one with + New', icon: '', disabled: true }); }
+    openMenu(anchor, items);
+  }
+
+  function chipMenu(b) {
+    var c = catById(b.dataset.cat);
+    var n = tasks.filter(function (t) { var x = catOf(t); return x && x.id === c.id; }).length;
+    var other = sides.filter(function (s) { return s.id !== c.side; })[0];
+    var items = [{ heading: c.name }, { label: 'Rename', icon: '✎', action: function () { startRename(c.id); } }];
+    if (other) {
+      items.push({ label: 'Put under ' + other.name, icon: '⇄', action: function () {
+        var was = c.side;
+        change({ action: 'update', id: c.id, side: other.id }, c.name + ' is now under ' + other.name,
+          { action: 'update', id: c.id, side: was });
+      } });
+    }
+    items.push({ label: 'Delete', icon: '×', disabled: n > 0, note: n > 0 ? 'only when empty' : '',
+      action: function () { deleteCat(c.id); } });
+    openMenu(b, items);
+  }
+
+  /* ------------------------------------------------------- saving to disk */
+  /* Every change goes to the server, and the page then draws what the server
+     says is on disk - so two tabs, or Claude editing the file, cannot leave the
+     page showing something that is not saved. */
+  function adopt(doc) {
+    if (!doc || !doc.categories) { return; }
+    sides = doc.sides;
+    cats = doc.categories;
+    placed = doc.tasks || {};
+  }
+  function post(body) {
+    return fetch('/api/categories', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        adopt(j);
+        if (r.status !== 200 || !j.ok) { throw new Error(j.error || 'The change was not saved.'); }
+        return j;
+      });
+    });
+  }
+  function refuse() {
+    toast('Nothing can be changed until ' + DATA.file + ' is fixed: ' + DATA.error, null, true);
+    return true;
+  }
+  /* Draw the change at once, save it, and if the server refuses, draw what it
+     has instead and say why. */
+  function change(body, done, undoBody, afterRender) {
+    if (locked && refuse()) { return; }
+    return post(body).then(function () {
+      renderBar();
+      render(true);
+      if (afterRender) { afterRender(); }
+      if (done) {
+        toast(done, undoBody ? function () {
+          change(undoBody, null, null, afterRender);
+        } : null);
+      }
+    }).catch(function (err) {
+      renderBar();
+      render(true);
+      toast(err.message, null, true);
+    });
+  }
+  function moveTask(id, catId) {
+    if (locked && refuse()) { return; }
+    var t = byId[id], old = placed[t.dir] ? { category: placed[t.dir].category, guess: placed[t.dir].guess } : null;
+    if (old && old.category === catId) { if (old.guess) { keepTask(id); } return; }
+    placed[t.dir] = { category: catId, guess: false };
+    land(id, true);
+    post({ action: 'move', task: t.dir, category: catId }).then(function () {
+      toast('Moved ' + label(t) + ' to ' + catById(catId).name, function () {
+        placed[t.dir] = old;
+        if (!old) { delete placed[t.dir]; }
+        land(id, true);
+        post({ action: 'move', task: t.dir, category: old ? old.category : null, guess: old ? old.guess : false })
+          .catch(function (err) { render(true); toast(err.message, null, true); });
+      });
+    }).catch(function (err) { render(true); toast(err.message, null, true); });
+  }
+  function keepTask(id) {
+    if (locked && refuse()) { return; }
+    var t = byId[id], p = placed[t.dir];
+    placed[t.dir] = { category: p.category, guess: false };
+    land(id, false);
+    post({ action: 'move', task: t.dir, category: p.category }).then(function () {
+      toast('Kept ' + label(t) + ' in ' + catById(p.category).name, function () {
+        placed[t.dir] = { category: p.category, guess: true };
+        land(id, false);
+        post({ action: 'move', task: t.dir, category: p.category, guess: true })
+          .catch(function (err) { render(true); toast(err.message, null, true); });
+      });
+    }).catch(function (err) { render(true); toast(err.message, null, true); });
+  }
+  /* Re-draw, then make sure the task is visible where it landed and flash it. */
+  function land(id, animate) {
+    render(animate);
+    var r = rows[id];
+    if (r.isConnected && r.hidden) {
+      unfolded[$('.fold', r.closest('.col')).dataset.key] = true;
+      render(false);
+    }
+    var el = r.isConnected ? r : $('.card[data-id="' + id + '"]', focusEl);
+    if (el && !el.hidden) {
+      el.classList.remove('flash');
+      void el.offsetWidth;
+      el.classList.add('flash');
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  function deleteCat(id) {
+    var at = orderedCats().indexOf(catById(id)), gone = catById(id);
+    if (sel.kind === 'cats' && sel.ids.indexOf(id) !== -1) {
+      var ids = sel.ids.filter(function (x) { return x !== id; });
+      sel = ids.length ? { kind: 'cats', ids: ids } : { kind: 'all' };
+    }
+    change({ action: 'delete', id: id }, 'Deleted ' + gone.name,
+      { action: 'add', id: gone.id, name: gone.name, side: gone.side, color: gone.color, holds: gone.holds,
+        at: cats.indexOf(gone) >= 0 ? cats.indexOf(gone) : at });
+  }
+
+  function toast(text, undo, bad) {
+    clearTimeout(toastTimer);
+    toastEl.innerHTML = '<span>' + esc(text) + '</span>' + (undo ? '<button type="button">Undo</button>' : '');
+    toastEl.classList.toggle('bad', !!bad);
+    toastEl.hidden = false;
+    if (!REDUCE) {
+      toastEl.animate([{ opacity: 0, transform: 'translate(-50%,8px)' }, { opacity: 1, transform: 'translate(-50%,0)' }],
+        { duration: 160, easing: 'ease-out' });
+    }
+    var b = $('button', toastEl);
+    if (b) { b.onclick = function () { toastEl.hidden = true; clearTimeout(toastTimer); undo(); }; }
+    toastTimer = setTimeout(function () { toastEl.hidden = true; }, bad ? 9000 : 6000);
+  }
+
+  /* ------------------------------------------------ new and renamed categories */
+  function openAdd() {
+    if (locked && refuse()) { return; }
+    var wrap = $('.addwrap', bar), side = sides[0].id;
+    wrap.innerHTML = '<form class="addform"><input aria-label="Name of the new category" placeholder="New category" maxlength="30">' +
+      '<span class="sidepick" role="group" aria-label="Side">' + sides.map(function (s) {
+        return '<button type="button" data-pick="' + esc(s.id) + '" aria-pressed="' + (s.id === side) + '">' + esc(s.name) + '</button>';
+      }).join('') + '</span><button type="submit" class="go">Add</button></form>';
+    var form = $('form', wrap), input = $('input', form);
+    input.focus();
+    function cancel() { renderBar(); render(false); }
+    form.addEventListener('click', function (e) {
+      var p = e.target.closest('[data-pick]');
+      if (!p) { return; }
+      side = p.dataset.pick;
+      $$('[data-pick]', form).forEach(function (x) { x.setAttribute('aria-pressed', x === p); });
+      input.focus();
+    });
+    form.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    form.addEventListener('focusout', function () {
+      setTimeout(function () {
+        if (form.isConnected && !form.contains(document.activeElement) && !input.value.trim()) { cancel(); }
+      }, 0);
+    });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      var had = cats.map(function (c) { return c.id; });
+      post({ action: 'add', name: name, side: side }).then(function () {
+        var added = cats.filter(function (c) { return had.indexOf(c.id) === -1; })[0];
+        renderBar();
+        render(true);
+        var chip = added && $('.chip[data-cat="' + added.id + '"]', bar);
+        if (chip && !REDUCE) {
+          chip.animate([{ transform: 'scale(.6)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+            { duration: 240, easing: 'cubic-bezier(.2,.8,.3,1.3)' });
+        }
+        toast('Added ' + name + ' under ' + sideName(side) + '. Drag tasks onto it.', added ? function () {
+          change({ action: 'delete', id: added.id });
+        } : null);
+      }).catch(function (err) { toast(err.message, null, true); input.focus(); });
+    });
+  }
+  /* The button becomes a small text field in place: Enter keeps, Esc drops. */
+  function startRename(id) {
+    if (locked && refuse()) { return; }
+    var b = $('.chip[data-cat="' + id + '"]', bar), c = catById(id);
+    if (!b || !c) { return; }
+    var box = document.createElement('span');
+    box.className = 'chip editing';
+    box.style.setProperty('--cc', colorVar(c));
+    box.innerHTML = '<i class="dot"></i><input aria-label="Category name" maxlength="30">';
+    var input = $('input', box);
+    input.value = c.name;
+    input.style.width = Math.max(6, c.name.length + 1) + 'ch';
+    b.replaceWith(box);
+    input.focus();
+    input.select();
+    var done = false;
+    function finish(keep) {
+      if (done) { return; }
+      done = true;
+      var v = input.value.trim(), old = c.name;
+      if (keep && v && v !== old) {
+        change({ action: 'update', id: id, name: v }, 'Renamed ' + old + ' to ' + v, { action: 'update', id: id, name: old });
+        return;
+      }
+      renderBar();
+      render(false);
+    }
+    input.addEventListener('input', function () { input.style.width = Math.max(6, input.value.length + 1) + 'ch'; });
+    input.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  /* ---------------------------------------------------------------- hover */
+  /* Hovering a category shows where its tasks are without moving anything. */
+  function peek(test) {
+    peekTest = test;
+    document.body.classList.add('peeking');
+    tasks.forEach(function (t) { rows[t.id].classList.toggle('lit', test(t)); });
+    $$('.card', focusEl).forEach(function (c) { c.classList.toggle('lit', test(byId[c.dataset.id])); });
+  }
+  function unpeek() { peekTest = null; document.body.classList.remove('peeking'); }
+  function peekFrom(el) {
+    if (dragId !== null || !el) { unpeek(); return; }
+    if (el.dataset.cat) { var id = el.dataset.cat; peek(function (t) { var c = catOf(t); return !!c && c.id === id; }); return; }
+    if (el.dataset.side) { var s = el.dataset.side; peek(function (t) { var c = catOf(t); return !!c && c.side === s; }); return; }
+    unpeek();
+  }
+  bar.addEventListener('mouseover', function (e) { peekFrom(e.target.closest('.chip[data-cat], .side')); });
+  bar.addEventListener('mouseleave', unpeek);
+  board.addEventListener('mouseover', function (e) { peekFrom(e.target.closest('.lg')); });
+  board.addEventListener('mouseleave', unpeek);
+
+  /* --------------------------------------------------------------- clicks */
+  bar.addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || b.closest('.addform') || e.detail > 1) { return; }
+    if (b.classList.contains('add')) { openAdd(); return; }
+    if (b.dataset.all) { setSel({ kind: 'all' }); return; }
+    if (b.classList.contains('side')) {
+      var s = b.dataset.side;
+      setSel(sel.kind === 'side' && sel.id === s ? { kind: 'all' } : { kind: 'side', id: s });
+      return;
+    }
+    if (b.dataset.cat) {
+      var id = b.dataset.cat;
+      if (e.metaKey || e.shiftKey || e.ctrlKey) {
+        var ids = sel.kind === 'cats' ? sel.ids.slice() : [];
+        var at = ids.indexOf(id);
+        if (at === -1) { ids.push(id); } else { ids.splice(at, 1); }
+        setSel(ids.length ? { kind: 'cats', ids: ids } : { kind: 'all' });
+      } else {
+        setSel(sel.kind === 'cats' && sel.ids.length === 1 && sel.ids[0] === id ? { kind: 'all' } : { kind: 'cats', ids: [id] });
+      }
+    }
+  });
+  bar.addEventListener('dblclick', function (e) {
+    var b = e.target.closest('.chip[data-cat]');
+    if (b) { e.preventDefault(); startRename(b.dataset.cat); }
+  });
+  bar.addEventListener('contextmenu', function (e) {
+    var b = e.target.closest('.chip[data-cat]');
+    if (b) { e.preventDefault(); chipMenu(b); }
+  });
+  document.addEventListener('click', function (e) {
+    var tw = e.target.closest('.row button.tw, .row button.more');
+    if (tw) { toggleSteps(holderOf(tw).dataset.id); return; }
+    var cat = e.target.closest('.row .cat, .card .cat');
+    if (cat) { e.preventDefault(); moveMenu(holderOf(cat).dataset.id, cat); return; }
+    var sb = e.target.closest('.sidebtn');
+    if (sb) {
+      setSel(sel.kind === 'side' && sel.id === sb.dataset.side ? { kind: 'all' } : { kind: 'side', id: sb.dataset.side });
+      return;
+    }
+    var lg = e.target.closest('.lg[data-cat]');
+    if (lg) { setSel({ kind: 'cats', ids: [lg.dataset.cat] }); return; }
+    var fold = e.target.closest('.fold');
+    if (fold) { unfolded[fold.dataset.key] = !unfolded[fold.dataset.key]; render(true); return; }
+    if (e.target.closest('.fhead .back')) { setSel({ kind: 'all' }); }
+  });
+
+  /* ------------------------------------------------------- drag and drop */
+  function clearDrag() {
+    document.body.classList.remove('dragging');
+    $$('.ghost, .over, .from').forEach(function (x) { x.classList.remove('ghost', 'over', 'from'); });
+    dragId = null;
+  }
+  function dropTarget(e) { return e.target.closest ? e.target.closest('.chip[data-cat]') : null; }
+  document.addEventListener('dragstart', function (e) {
+    var h = e.target.closest && e.target.closest('.row, .card');
+    if (!h || !sortable(byId[h.dataset.id])) { return; }
+    dragId = h.dataset.id;
+    try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) { /* old browsers */ }
+    closeMenu(false);
+    unpeek();
+    document.body.classList.add('dragging');
+    h.classList.add('ghost');
+    var c = catOf(byId[dragId]), from = c && $('.chip[data-cat="' + c.id + '"]', bar);
+    if (from) { from.classList.add('from'); }
+  });
+  document.addEventListener('dragover', function (e) {
+    if (dragId === null) { return; }
+    var t = dropTarget(e);
+    $$('.over').forEach(function (o) { if (o !== t) { o.classList.remove('over'); } });
+    if (!t) { return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    t.classList.add('over');
+  });
+  document.addEventListener('drop', function (e) {
+    var t = dropTarget(e);
+    if (dragId === null || !t) { return; }
+    e.preventDefault();
+    var id = dragId, catId = t.dataset.cat;
+    clearDrag();
+    moveTask(id, catId);
+  });
+  document.addEventListener('dragend', clearDrag);
+
+  /* ------------------------------------------------------ everything else */
+  q.addEventListener('input', function () {
+    query = q.value.trim().toLowerCase();
+    cursorKey = null;
+    render(false);
+  });
+  $$('.seg [data-steps]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      stepsMode = b.dataset.steps;
+      flipped = {};
+      writeSteps();
+      paintSteps_();
+      render(true);
+    });
+  });
+  function paintSteps_() {
+    $$('.seg [data-steps]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.steps === stepsMode); });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!menu.hidden) { return; }
+    var active = document.activeElement, typing = active === q;
+    if (active && active.tagName === 'INPUT' && !typing) { return; }
+    if (e.altKey && /^Digit[0-9]$/.test(e.code)) {
+      e.preventDefault();
+      var d = +e.code.slice(5);
+      if (d === 0) { setSel({ kind: 'all' }); return; }
+      var c = orderedCats()[d - 1];
+      if (c) { setSel({ kind: 'cats', ids: [c.id] }); }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) { return; }
+    if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); q.select(); return; }
+    if (e.key === 'Escape') {
+      if (q.value) { q.value = ''; query = ''; cursorKey = null; render(false); return; }
+      if (sel.kind !== 'all') { setSel({ kind: 'all' }); return; }
+      q.blur();
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); return; }
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (!typing || !q.value)) {
+      e.preventDefault();
+      arrow(e.key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (active && (active.tagName === 'A' || active.tagName === 'BUTTON')) { return; }
+      var el = elOf(cursorKey) || (stops.length === 1 ? stops[0] : null);
+      if (el) { e.preventDefault(); location.href = el.getAttribute('href'); }
+    }
+  });
+  window.addEventListener('resize', function () { closeMenu(false); });
+
+  if (DATA.error) {
+    noticeEl.innerHTML = '<b>' + esc(DATA.file) + ' could not be read</b> (' + esc(DATA.error) + '). ' +
+      'Every task shows as not sorted, and nothing is written to the file until it is fixed.';
+    noticeEl.hidden = false;
+  }
+  renderBar();
+  paintSteps_();
+  render(false);
+  q.focus({ preventScroll: true });
+})();

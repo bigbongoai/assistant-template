@@ -843,294 +843,14 @@ def rename_step(task_rel: str, step: Any, title: Any) -> tuple[int, dict[str, An
 
 # ---------------------------------------------------------------- index page
 
-# The page below is assembled with an f-string, so CSS and JS live in plain
-# string constants: no doubled braces to get wrong, and no reason to touch them
-# when the markup changes.
-
-INDEX_CSS = """
-:root{--bg:#f7f7f5;--surface:#fff;--panel:#fff;--border:#e3e3de;
---copy:#1a1a18;--muted:#55554f;--subtle:#85857e;--primary:#b5541f;
---on-bg:#b5541f;--on-fg:#fff;--chip:#efefe9;
---sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,ui-sans-serif,sans-serif;
---mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-@media (prefers-color-scheme:dark){
-:root{--bg:#17171a;--surface:#1f1f23;--panel:#1f1f23;--border:#33333a;
---copy:#ececea;--muted:#b8b8b2;--subtle:#8f8f89;--primary:#e08050;
---on-bg:#e08050;--on-fg:#17171a;--chip:#2a2a30}}
-*{box-sizing:border-box}
-[hidden]{display:none!important}
-body{margin:0;background:var(--bg);color:var(--copy);font-family:var(--sans);
-padding:44px 20px 80px;line-height:1.6;-webkit-text-size-adjust:100%}
-.wrap{margin:0}
-.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;
-text-transform:uppercase;color:var(--subtle)}
-h1{font-size:30px;margin:10px 0 6px;font-weight:660;letter-spacing:-.02em}
-.lede{color:var(--muted);margin:0 0 11px;max-width:66ch;font-size:14.5px}
-code{font-family:var(--mono);font-size:.9em}
-
-/* The search block stays put while the list scrolls under it, so the filters
-   and the result count are readable from anywhere in a long workspace. */
-.search{position:sticky;top:0;z-index:5;background:var(--bg);
-padding:10px 0 14px;margin-bottom:4px}
-.field{display:flex;align-items:center;gap:10px;border:1px solid var(--border);
-background:var(--surface);border-radius:10px;padding:0 12px;cursor:text}
-.field:focus-within{border-color:var(--primary)}
-.field svg{width:15px;height:15px;flex:none;color:var(--subtle)}
-#q{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--copy);
-font-family:var(--sans);font-size:15px;padding:11px 0}
-#q::placeholder{color:var(--subtle)}
-#q::-webkit-search-cancel-button{filter:grayscale(1) opacity(.5)}
-kbd{font-family:var(--mono);font-size:10px;color:var(--subtle);
-border:1px solid var(--border);border-radius:4px;padding:1px 5px;
-background:var(--chip);white-space:nowrap}
-.status{display:flex;justify-content:space-between;align-items:center;
-gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;
-color:var(--subtle);margin-top:9px}
-.hint{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-
-.filters{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 0 0;align-items:center}
-.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.chips .lbl{font-family:var(--mono);font-size:10px;color:var(--subtle);
-text-transform:uppercase;letter-spacing:.07em;margin-right:2px}
-.chip{font:inherit;font-size:12.5px;color:var(--muted);background:var(--panel);
-border:1px solid var(--border);border-radius:8px;padding:5px 10px;cursor:pointer;
-display:inline-flex;align-items:center;gap:6px;line-height:1}
-.chip:hover{border-color:var(--primary);color:var(--copy)}
-.chip.on{background:var(--on-bg);border-color:var(--on-bg);color:var(--on-fg)}
-.chip .c{font-family:var(--mono);font-size:10.5px;color:var(--subtle)}
-.chip.on .c{color:var(--on-fg);opacity:.75}
-
-/* One row per task. The task on the left opens its own page; its steps sit in
-   the column to the right, newest first, one line each, so sixteen still scan. */
-article.task{display:grid;grid-template-columns:minmax(0,240px) minmax(0,1fr);
-gap:8px 20px;border:1px solid var(--border);background:var(--panel);
-border-radius:12px;padding:12px 14px;margin:0 0 10px}
-.tside{min-width:0}
-.tlink{display:flex;align-items:baseline;gap:.55rem;text-decoration:none;
-color:var(--copy);border-radius:8px;padding:5px 7px;margin:-5px -7px 0;
-scroll-margin-top:170px}
-.tlink:hover .tname{color:var(--primary)}
-.tlink.on{background:var(--chip);box-shadow:inset 0 0 0 1px var(--primary)}
-.num{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--muted);
-background:var(--chip);padding:.18em .5em;border-radius:5px;letter-spacing:.02em}
-.tname{font-weight:600;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
-.tmeta{font-family:var(--mono);font-size:10.5px;color:var(--subtle);margin-top:5px}
-
-ol.steps{list-style:none;margin:0;padding:0;min-width:0;display:flex;
-flex-direction:column;gap:1px}
-.pg{display:grid;grid-template-columns:3.4em minmax(0,1fr) auto;align-items:baseline;
-gap:10px;text-decoration:none;color:var(--copy);border-radius:6px;padding:3px 7px;
-scroll-margin-top:170px}
-.pg:hover,.pg.on{background:var(--chip)}
-.pg.on{box-shadow:inset 0 0 0 1px var(--primary)}
-.snum{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
-.stitle{font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;
-white-space:nowrap}
-.pg:hover .stitle{color:var(--primary)}
-.pg.sub .stitle{font-size:12.5px;color:var(--muted)}
-.pg.sub .stitle:before{content:"\\21b3\\00a0";color:var(--subtle)}
-.meta{font-family:var(--mono);font-size:10.5px;color:var(--subtle);
-white-space:nowrap;text-align:right}
-.meta .db{color:var(--primary)}
-
-.divider{display:flex;align-items:center;gap:12px;margin:26px 0 12px;
-font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
-text-transform:uppercase;color:var(--subtle)}
-.divider:after{content:"";flex:1;height:1px;background:var(--border)}
-#empty{border:1px dashed var(--border);border-radius:10px;padding:28px 18px;
-text-align:center;color:var(--subtle);font-size:13.5px}
-
-@media (max-width:640px){
-body{padding:32px 14px 64px}
-h1{font-size:24px}
-article.task{grid-template-columns:minmax(0,1fr);padding:11px 12px}
-.pg{grid-template-columns:3.4em minmax(0,1fr)}
-.stitle{white-space:normal;overflow-wrap:anywhere}
-.pg .meta{grid-column:2;text-align:left;white-space:normal}
-}
-"""
-
-INDEX_JS = """
-(function () {
-  var input = document.getElementById('q');
-  var countEl = document.getElementById('count');
-  var emptyEl = document.getElementById('empty');
-  var tasks = Array.prototype.slice.call(document.querySelectorAll('article.task'));
-  var areas = Array.prototype.slice.call(document.querySelectorAll('section.area'));
-  var chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
-  /* Everything the arrow keys can land on: a task's own link and each page link. */
-  var movers = Array.prototype.slice.call(document.querySelectorAll('.tlink, .pg.it'));
-  /* One element per page: a step's page link, or a one-page task's own link. */
-  var total = document.querySelectorAll('[data-page]').length;
-  var stops = [];
-  var visible = 0;
-  var cursor = -1;
-  /* Two independent filters that combine with each other and with the search
-     box. Every one of them is read off the filesystem, so none of them can
-     claim something the workspace does not actually record. */
-  var pick = { show: 'all', where: 'all' };
-
-  function matches(el) {
-    var s = pick.show;
-    if (s === 'recent' && el.getAttribute('data-recent') !== '1') { return false; }
-    if (s === 'threads' && el.getAttribute('data-threads') !== '1') { return false; }
-    if (s === 'no-notes' && el.getAttribute('data-notes') !== '0') { return false; }
-    if (pick.where !== 'all' && el.getAttribute('data-area') !== pick.where) {
-      return false;
-    }
-    return true;
-  }
-
-  function found(el, q) {
-    return q === '' || el.getAttribute('data-hay').indexOf(q) !== -1;
-  }
-
-  /* The chip's own label is the wording, so the summary line can never drift
-     from the button the reader just pressed. */
-  function labelFor(group) {
-    for (var i = 0; i < chips.length; i++) {
-      if (chips[i].getAttribute('data-group') === group
-        && chips[i].getAttribute('data-value') === pick[group]) {
-        return chips[i].firstChild.textContent.trim().toLowerCase();
-      }
-    }
-    return pick[group];
-  }
-
-  function describe(q) {
-    var bits = [];
-    if (pick.show !== 'all') { bits.push(labelFor('show')); }
-    if (pick.where !== 'all') { bits.push(labelFor('where')); }
-    if (q) { bits.push('"' + q + '"'); }
-    return bits.length
-      ? visible + ' of ' + total + ' pages · ' + bits.join(' · ')
-      : countEl.getAttribute('data-all');
-  }
-
-  function paintCursor() {
-    for (var i = 0; i < movers.length; i++) { movers[i].classList.remove('on'); }
-    if (cursor >= 0 && cursor < stops.length) {
-      stops[cursor].classList.add('on');
-      stops[cursor].scrollIntoView({ block: 'nearest' });
-    }
-  }
-
-  function apply() {
-    var q = input.value.trim().toLowerCase();
-    var narrowed = q !== '' || pick.show !== 'all' || pick.where !== 'all';
-    stops = [];
-    visible = 0;
-    for (var t = 0; t < tasks.length; t++) {
-      var task = tasks[t];
-      var head = task.querySelector('.tlink');
-      if (task.classList.contains('single')) {
-        var ok = found(head, q) && matches(head);
-        task.hidden = !ok;
-        if (ok) { stops.push(head); visible++; }
-        continue;
-      }
-      var links = task.querySelectorAll('.pg.it');
-      var here = [];
-      for (var i = 0; i < links.length; i++) {
-        var on = found(links[i], q) && matches(links[i]);
-        links[i].hidden = !on;
-        if (on) { here.push(links[i]); }
-      }
-      var steps = task.querySelectorAll('li.step');
-      for (var s = 0; s < steps.length; s++) {
-        steps[s].hidden = !steps[s].querySelector('.pg.it:not([hidden])');
-      }
-      task.hidden = here.length === 0;
-      if (here.length) {
-        /* The task's own page is a stop only when the search names the task
-           itself, so typing a page's title puts the cursor on that page. */
-        if (q === '' || found(head, q)) { stops.push(head); }
-        stops = stops.concat(here);
-        visible += here.length;
-      }
-      var badge = task.querySelector('.gc');
-      if (badge) {
-        badge.textContent = narrowed
-          ? here.length + ' of ' + links.length + ' pages'
-          : badge.getAttribute('data-all');
-      }
-    }
-    /* An "Archived" rule with no archived rows below it would be lying about
-       what is on screen. */
-    for (var a = 0; a < areas.length; a++) {
-      areas[a].hidden = !areas[a].querySelector('article.task:not([hidden])');
-    }
-    countEl.textContent = describe(q);
-    emptyEl.hidden = visible !== 0;
-    cursor = (q && stops.length) ? 0 : -1;
-    paintCursor();
-  }
-
-  for (var c = 0; c < chips.length; c++) {
-    chips[c].addEventListener('click', function (e) {
-      var group = e.currentTarget.getAttribute('data-group');
-      pick[group] = e.currentTarget.getAttribute('data-value');
-      for (var j = 0; j < chips.length; j++) {
-        if (chips[j].getAttribute('data-group') === group) {
-          chips[j].classList.toggle('on', chips[j] === e.currentTarget);
-        }
-      }
-      apply();
-    });
-  }
-
-  function move(step) {
-    if (!stops.length) { return; }
-    cursor = (cursor + step + stops.length) % stops.length;
-    paintCursor();
-  }
-
-  function openCursor() {
-    var el = cursor >= 0 ? stops[cursor] : (stops.length === 1 ? stops[0] : null);
-    if (el) { window.location.href = el.getAttribute('href'); }
-  }
-
-  input.addEventListener('input', apply);
-
-  document.addEventListener('keydown', function (e) {
-    if (e.metaKey || e.ctrlKey || e.altKey) { return; }
-    var active = document.activeElement;
-    var typing = active === input;
-
-    if (e.key === '/' && !typing) {
-      e.preventDefault();
-      input.focus();
-      input.select();
-      return;
-    }
-    if (e.key === 'Escape') {
-      input.value = '';
-      apply();
-      input.blur();
-      return;
-    }
-    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
-    if (e.key === 'Enter') {
-      if (active && active.tagName === 'A') { return; }
-      if (cursor >= 0 || stops.length === 1) { e.preventDefault(); openCursor(); }
-    }
-  });
-
-  apply();
-  input.focus();
-})();
-"""
+# The index page's look and behaviour live beside this file, in index.css and
+# index.js. The page itself carries only its data, as one JSON object.
 
 SEARCH_ICON = (
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
     'stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle>'
     '<path d="M20 20l-3.6-3.6"></path></svg>'
 )
-
-# What "Last 7 days" means, in one place, so the chip and the lede agree.
-RECENT_DAYS = 7
-
 
 def stamp(mtime: float, now: datetime) -> str:
     """`12 Aug`, or `12 Aug 25` once the year stops being obvious."""
@@ -1141,216 +861,300 @@ def stamp(mtime: float, now: datetime) -> str:
     return f"{when.day} {when:%b}{tail}"
 
 
-def page_meta(page: dict[str, Any]) -> str:
-    """Notes, threads and date for one page, as the index has always shown them."""
-    sources = page["sources"]
-    meta = []
-    if sources:
-        meta.append(f'{sources} note{"" if sources == 1 else "s"}')
-    if page["has_db"]:
-        meta.append('<span class="db">threads</span>')
-    if page["date"]:
-        meta.append(html_escape(page["date"]))
-    return " &middot; ".join(meta)
+# ------------------------------------------------------------------ categories
+
+# The person's task categories, and which category every task is in, in one
+# file at the workspace root. One file rather than a line in each task's
+# _task.json, because a task that is a git repository of its own (a submodule)
+# must never be written into, and it still needs a category.
+CATEGORIES_FILE = ROOT / "_categories.json"
+DEFAULT_SIDES = ({"id": "work", "name": "Work"}, {"id": "private", "name": "Private"})
+PALETTE = ("blue", "amber", "teal", "rose", "violet", "green", "slate")
+CATEGORY_NAME_MAX = 30
+CATEGORY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+CATEGORIES_ABOUT = (
+    "Task categories for the index page at pa.lcl. Each side is one column; each "
+    "category sits on one side. 'tasks' says which category each task folder is in; "
+    "'guess' marks one Claude filed without being sure, drawn with a dotted bar until "
+    "it is moved or kept. Claude reads each 'holds' line when it files a new task. "
+    "The index page writes this file when a task is dragged to another category.")
 
 
-def page_attrs(page: dict[str, Any], extra: str = "") -> str:
-    """What the search box and the filter chips read off one page."""
-    # One lowercase blob per page is all the filter ever reads, so typing a task
-    # number, a step name, a word from the title, or part of the path all hit
-    # the same way.
-    hay = html_escape(" ".join([
-        str(page["number"]) if page["number"] is not None else "",
-        page["title"], page["task"], page["task_dir"], page["step"],
-        page["file"], page["rel"], extra,
-    ]).lower(), quote=True)
-    return (
-        f' data-page="1" data-hay="{hay}"'
-        f' data-area="{html_escape(page["area"], quote=True)}"'
-        f' data-notes="{page["sources"]}"'
-        f' data-threads="{1 if page["has_db"] else 0}"'
-        f' data-recent="{1 if page["recent"] else 0}"'
-    )
+def normalize_categories(raw: Any) -> dict[str, Any]:
+    """Only what the index can draw: sides, well-formed categories, and task
+    entries that name a category that exists. Reading never deletes anything:
+    what is left out here stays in the file."""
+    raw = raw if isinstance(raw, dict) else {}
+    sides: list[dict[str, str]] = []
+    for side in raw.get("sides") if isinstance(raw.get("sides"), list) else []:
+        sid = side.get("id") if isinstance(side, dict) else None
+        if isinstance(sid, str) and sid and all(s["id"] != sid for s in sides):
+            sides.append({"id": sid, "name": clean_text(side.get("name"), 30) or humanize(sid)})
+    if not sides:
+        sides = [dict(s) for s in DEFAULT_SIDES]
+    side_ids = [s["id"] for s in sides]
+
+    cats: list[dict[str, str]] = []
+    for cat in raw.get("categories") if isinstance(raw.get("categories"), list) else []:
+        cid = cat.get("id") if isinstance(cat, dict) else None
+        if not isinstance(cid, str) or not CATEGORY_ID_RE.match(cid) or any(c["id"] == cid for c in cats):
+            continue
+        cats.append({
+            "id": cid,
+            "name": clean_text(cat.get("name"), CATEGORY_NAME_MAX) or cid,
+            "side": cat["side"] if cat.get("side") in side_ids else side_ids[0],
+            "color": cat["color"] if cat.get("color") in PALETTE else PALETTE[len(cats) % len(PALETTE)],
+            "holds": clean_text(cat.get("holds"), 240),
+        })
+
+    known = {c["id"] for c in cats}
+    tasks: dict[str, dict[str, Any]] = {}
+    for folder, entry in (raw.get("tasks") if isinstance(raw.get("tasks"), dict) else {}).items():
+        if isinstance(entry, dict) and entry.get("category") in known:
+            tasks[folder] = {"category": entry["category"], "guess": entry.get("guess") is True}
+    return {"sides": sides, "categories": cats, "tasks": tasks}
 
 
-def step_hay(step: dict[str, Any]) -> str:
-    """A step's number, its display name, its folder name and its few words."""
-    return " ".join([step["num"], step["title"], step["name"], step["description"]])
+def load_categories() -> dict[str, Any]:
+    """`_categories.json`, normalised and cached on mtime.
 
-
-def render_steps(task: dict[str, Any], stops: bool) -> str:
-    """The right-hand column: every step, newest first, each page on one line.
-
-    A step's first line carries its number and display name; any further pages
-    in the same step follow it, indented, under their own titles.
+    No file is not an error: every task simply shows as not sorted. A file that
+    does not parse comes back with `error` set, so the index can say so, and
+    change_categories refuses to write over it.
     """
-    rows = []
-    for step in task["steps"]:
-        lines = []
-        for i, page in enumerate(step["pages"]):
-            first = i == 0
-            label = step["title"] if first else page["title"]
-            # A one-page task's line repeats its own link on the left, so it is
-            # neither a stop for the arrow keys nor a second tab stop.
-            attrs = page_attrs(page, step_hay(step)) if stops else ' tabindex="-1"'
-            cls = ("pg it" if stops else "pg") + ("" if first else " sub")
-            lines.append(
-                f'<a class="{cls}" href="/page/{quote(page["rel"])}"'
-                f' title="{html_escape(page["detail"], quote=True)}"{attrs}>'
-                f'<span class="snum">{html_escape(step["num"]) if first else ""}</span>'
-                f'<span class="stitle">{html_escape(label)}</span>'
-                f'<span class="meta">{page_meta(page)}</span></a>'
-            )
-        rows.append(f'<li class="step">{"".join(lines)}</li>')
-    return f'<ol class="steps">{"".join(rows)}</ol>'
+    try:
+        stat = CATEGORIES_FILE.stat()
+    except OSError:
+        return {**normalize_categories({}), "exists": False, "error": ""}
+    key = str(CATEGORIES_FILE)
+    cached = _meta_cache.get(key)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
+    try:
+        raw = json.loads(CATEGORIES_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("the top level has to be an object")
+        data = {**normalize_categories(raw), "exists": True, "error": ""}
+    except (OSError, ValueError) as exc:     # JSONDecodeError is a ValueError
+        data = {**normalize_categories({}), "exists": True, "error": str(exc)}
+    _meta_cache[key] = (stat.st_mtime_ns, stat.st_size, data)
+    return data
 
 
-def render_task_row(task: dict[str, Any]) -> str:
-    """One task: the task on the left, its steps and their pages on the right."""
-    pages, steps = task["pages"], task["steps"]
-    number = task["number"]
-    num = f'<span class="num">{number}</span>' if number is not None else ""
-    name = f'<span class="tname">{html_escape(task["name"])}</span>'
-    task_hay = " ".join([str(number) if number is not None else "", task["name"],
-                         task["task_dir"], task["area"]])
-    # The summary line may break only at its dots, never inside "10 Sep".
-    when = (f' &middot; {html_escape(task["date"]).replace(" ", "&nbsp;")}'
-            if task["date"] else "")
-
-    if len(pages) == 1:
-        # Nothing to map: the task link opens the page itself.
-        head = (f'<a class="tlink it" href="{task["href"]}"'
-                f'{page_attrs(pages[0], task_hay + " " + step_hay(steps[0]))}>{num}{name}</a>')
-        return (f'<article class="task single"><div class="tside">{head}'
-                f'<div class="tmeta">One&nbsp;page{when}</div></div>'
-                f'{render_steps(task, stops=False)}</article>')
-
-    counts = (f'{len(steps)}&nbsp;step{"" if len(steps) == 1 else "s"} &middot; '
-              f'{len(pages)}&nbsp;pages')
-    head = (f'<a class="tlink" href="{task["href"]}"'
-            f' data-hay="{html_escape(task_hay.lower(), quote=True)}">{num}{name}</a>')
-    # The date gets its own line here: beside the counts it no longer fits the
-    # column and would leave a dot hanging at the end of the first line.
-    changed = (f'<div class="tmeta">Changed {html_escape(task["date"]).replace(" ", "&nbsp;")}</div>'
-               if task["date"] else "")
-    return (f'<article class="task"><div class="tside">{head}'
-            f'<div class="tmeta">Task&nbsp;page &middot; '
-            f'<span class="gc" data-all="{counts}">{counts}</span></div>{changed}</div>'
-            f'{render_steps(task, stops=True)}</article>')
+def category_name(value: Any) -> tuple[str, str]:
+    """(clean name, "") or ("", the reason it was refused)."""
+    if not isinstance(value, str):
+        return "", "Send the name as text."
+    clean = " ".join(value.split())
+    if not clean:
+        return "", "A category needs a name."
+    if len(clean) > CATEGORY_NAME_MAX:
+        return "", f"That name is {len(clean)} characters long. Keep it to {CATEGORY_NAME_MAX} or fewer."
+    if any(ord(ch) < 32 or 127 <= ord(ch) < 160 for ch in clean):
+        return "", "The name contains a control character. Use plain text."
+    return clean, ""
 
 
-def render_chips(pages: list[dict[str, Any]]) -> str:
-    """Filters with live counts, all of them read off the filesystem.
+def apply_category_change(raw: dict[str, Any], action: Any, data: dict[str, Any]) -> str:
+    """Change `raw` in place. Returns "" on success, or why nothing changed."""
+    view = normalize_categories(raw)
+    ids = [c["id"] for c in view["categories"]]
+    side_ids = [s["id"] for s in view["sides"]]
+    cats = raw.setdefault("categories", [])
+    tasks = raw.setdefault("tasks", {})
 
-    This workspace has no `status:` field anywhere, so there is deliberately no
-    status filter: a chip claiming a task is "done" would be inventing the fact.
-    What is left is what the files themselves record - when a page last changed,
-    whether a conversation database sits next to it, whether it has any working
-    notes behind it, and which content folder it lives in.
-    """
-    total = len(pages)
+    def entry(cid: Any) -> dict[str, Any] | None:
+        return next((c for c in cats if isinstance(c, dict) and c.get("id") == cid), None)
 
-    show: list[tuple[str, str, int]] = [("all", "All", total)]
-    for value, label, test in (
-        ("recent", f"Last {RECENT_DAYS} days", lambda p: p["recent"]),
-        ("threads", "With threads", lambda p: p["has_db"]),
-        ("no-notes", "No notes", lambda p: not p["sources"]),
-    ):
-        found = sum(1 for p in pages if test(p))
-        # A filter that matches everything, or nothing, tells the reader nothing
-        # and only costs them a row of buttons to scan.
-        if 0 < found < total:
-            show.append((value, label, found))
-
-    # Derived from what is actually on disk, so a workspace with no archive/ or
-    # examples/ never sees the row at all.
-    where: list[tuple[str, str, int]] = [("all", "All", total)]
-    for area in CONTENT_DIRS:
-        found = sum(1 for p in pages if p["area"] == area)
-        if found:
-            where.append((area, humanize(area), found))
-
-    def row(group: str, label: str, chips: list[tuple[str, str, int]]) -> str:
-        buttons = "".join(
-            f'<button type="button" class="chip{" on" if value == "all" else ""}"'
-            f' data-group="{group}" data-value="{html_escape(value, quote=True)}">'
-            f'{html_escape(text)} <span class="c">{count}</span></button>'
-            for value, text, count in chips
-        )
-        return f'<div class="chips"><span class="lbl">{label}</span>{buttons}</div>'
-
-    show_row = row("show", "Show", show) if len(show) > 1 else ""
-    where_row = row("where", "Where", where) if len(where) > 2 else ""
-    if not show_row and not where_row:
+    if action == "move":
+        folder = data.get("task")
+        if not isinstance(folder, str) or resolve_task(f"{CONTENT_DIRS[0]}/{folder}") is None:
+            return f"There is no task folder called {folder!r}."
+        target = data.get("category")
+        if target is None:                   # back to "not sorted", for Undo
+            tasks.pop(folder, None)
+            return ""
+        if target not in ids:
+            return "That category does not exist any more. Reload the page."
+        tasks[folder] = {"category": target, **({"guess": True} if data.get("guess") is True else {})}
         return ""
-    return f'<div class="filters">{show_row}{where_row}</div>'
+
+    if action == "add":
+        name, why = category_name(data.get("name"))
+        if why:
+            return why
+        if any(c["name"].lower() == name.lower() for c in view["categories"]):
+            return f"There is already a category called {name}."
+        side = data.get("side")
+        if side not in side_ids:
+            return "Choose a side for the new category."
+        cid = data.get("id")
+        if not isinstance(cid, str) or not CATEGORY_ID_RE.match(cid) or cid in ids:
+            base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:32] or "category"
+            cid, n = base, 2
+            while cid in ids:
+                cid, n = f"{base}-{n}", n + 1
+        used = {c["color"] for c in view["categories"]}
+        color = data.get("color") if data.get("color") in PALETTE else next(
+            (p for p in PALETTE if p not in used), PALETTE[len(ids) % len(PALETTE)])
+        new = {"id": cid, "name": name, "side": side, "color": color,
+               "holds": clean_text(data.get("holds"), 240)}
+        # `at` puts a deleted category back where it was, for Undo.
+        at = data.get("at")
+        before = entry(ids[at]) if isinstance(at, int) and not isinstance(at, bool) and 0 <= at < len(ids) else None
+        cats.insert(cats.index(before), new) if before else cats.append(new)
+        return ""
+
+    target = entry(data.get("id"))
+    if target is None or target.get("id") not in ids:
+        return "That category does not exist any more. Reload the page."
+
+    if action == "update":
+        if "name" in data:
+            name, why = category_name(data.get("name"))
+            if why:
+                return why
+            if any(c["name"].lower() == name.lower() and c["id"] != target["id"] for c in view["categories"]):
+                return f"There is already a category called {name}."
+            target["name"] = name
+        if "side" in data:
+            if data.get("side") not in side_ids:
+                return "There is no such side."
+            target["side"] = data["side"]
+        return ""
+
+    if action == "delete":
+        count = sum(1 for e in view["tasks"].values() if e["category"] == target["id"])
+        if count:
+            return f"{target.get('name')} still holds {count} task{'' if count == 1 else 's'}. Move them first."
+        cats.remove(target)
+        return ""
+
+    return "Unknown change."
+
+
+def change_categories(action: Any, data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """One change from the index page, written atomically. Returns (status, body).
+
+    The body always carries the file as it now stands, so the page redraws from
+    what is on disk. A refused change is an answer (200, ok false), like a
+    refused step name; an unreadable file is a real error and is left alone.
+    """
+    name = CATEGORIES_FILE.name
+    with lock_for(CATEGORIES_FILE):
+        if CATEGORIES_FILE.exists():
+            try:
+                raw = json.loads(CATEGORIES_FILE.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                return 409, {"error": f"{name} could not be read ({exc}), so nothing was changed. "
+                                      "Fix the file, then try again."}
+            if not isinstance(raw, dict):
+                return 409, {"error": f"{name} is not a JSON object, so nothing was changed."}
+            for key, kind in (("categories", list), ("tasks", dict)):
+                if key in raw and not isinstance(raw[key], kind):
+                    return 409, {"error": f'"{key}" in {name} has the wrong shape, so nothing was changed.'}
+        else:
+            raw = {"about": CATEGORIES_ABOUT, "sides": [dict(s) for s in DEFAULT_SIDES],
+                   "categories": [], "tasks": {}}
+        why = apply_category_change(raw, action, data)
+        if why:
+            return 200, {"ok": False, "error": why, **normalize_categories(raw)}
+        write_json_atomic(CATEGORIES_FILE, raw)
+        return 200, {"ok": True, **normalize_categories(raw)}
+
+
+# ---------------------------------------------------------------- index data
+
+
+def index_data() -> dict[str, Any]:
+    """Everything the index page draws, as one object: every task with its
+    steps and their pages, and the categories. index.js does the drawing."""
+    now = datetime.now()
+    cats = load_categories()
+    tasks = []
+    for task in build_tasks(discover_pages()):
+        filed = cats["tasks"].get(task["task_dir"]) if task["area"] == CONTENT_DIRS[0] else None
+        steps = [{
+            "num": step["num"],
+            "title": step["title"],
+            "href": "/page/" + quote(step["main"]["rel"]),
+            "threads": step["main"]["has_db"],
+            # A step's other pages, each reachable from here as they were before.
+            "more": [{"title": p["title"], "href": "/page/" + quote(p["rel"]), "threads": p["has_db"]}
+                     for p in step["pages"][1:]],
+        } for step in task["steps"]]
+        tasks.append({
+            "id": f'{task["area"]}/{task["task_dir"]}',
+            "area": task["area"],
+            "dir": task["task_dir"],
+            "n": task["number"],
+            "name": task["name"],
+            "href": task["href"],
+            "date": stamp(task["mtime"], now),
+            "pages": len(task["pages"]),
+            "steps": steps,
+            "category": filed["category"] if filed else None,
+            "guess": bool(filed and filed["guess"]),
+        })
+    return {
+        "sides": cats["sides"],
+        "categories": cats["categories"],
+        "tasks": tasks,
+        "areas": [{"id": a, "name": humanize(a)} for a in CONTENT_DIRS],
+        "file": CATEGORIES_FILE.name,
+        "exists": cats["exists"],
+        "error": cats["error"],
+    }
 
 
 def render_index() -> bytes:
-    pages = discover_pages()
-    now = datetime.now()
-    cutoff = now.timestamp() - RECENT_DAYS * 86400
-    for page in pages:
-        page["recent"] = page["mtime"] >= cutoff
-        page["date"] = stamp(page["mtime"], now)
-    tasks = build_tasks(pages)
-    for task in tasks:
-        task["date"] = stamp(task["mtime"], now)
-
-    sections: list[str] = []
-    current_area = None
-    for task in tasks:
-        if task["area"] != current_area:
-            if current_area is not None:
-                sections.append("</section>")
-            # `tasks/` is the main sequence and needs no announcement; anything
-            # else gets a rule, so archived work is visibly set apart from live
-            # work rather than blending into the end of the list.
-            rule = (
-                f'<div class="divider">{html_escape(humanize(task["area"]))}</div>'
-                if task["area"] != CONTENT_DIRS[0] else ""
-            )
-            sections.append(f'<section class="area">{rule}')
-            current_area = task["area"]
-        sections.append(render_task_row(task))
-    if current_area is not None:
-        sections.append("</section>")
-
-    listing = "".join(sections)
-    count = len(pages)
-    summary = (f'{count} page{"" if count == 1 else "s"} in '
-               f'{len(tasks)} task{"" if len(tasks) == 1 else "s"}')
+    data = index_data()
+    count = sum(t["pages"] for t in data["tasks"])
+    fallback = "".join(
+        f'<li><a href="{html_escape(t["href"], quote=True)}">'
+        f'{t["n"] if t["n"] is not None else ""} {html_escape(t["name"])}</a></li>'
+        for t in data["tasks"])
     folders = ", ".join(f"<code>{area}/</code>" for area in CONTENT_DIRS)
-
     body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ask AI &middot; workspace</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9998;</text></svg>">
-<style>{INDEX_CSS}</style></head><body><div class="wrap">
-<div class="eyebrow">_askai</div>
-<h1>Workspace pages</h1>
-<p class="lede">Every HTML deliverable under {folders}, newest task first, served with
-Ask AI injected. A task with more than one page opens a page of its own that maps its
-steps; the column to its right lists those steps and their pages, newest first. Select
-any passage on a page to ask about it. Each page keeps its own threads and highlights in
-its own database sitting next to the file, and answers are grounded in that task's
-working notes.</p>
-<p class="lede">Nothing here claims a task is finished: this workspace records no status
-anywhere, so the index does not invent one. Every count is read off the files - <b>notes</b>
-is how many <code>.md</code> files the model is given for that page (those beside it, plus
-those at its task root), <b>threads</b> means a conversation database already sits next to
-it, and the date is the file's last-modified time.</p>
-<div class="search">
-<label class="field" for="q">{SEARCH_ICON}<input id="q" type="search" autocomplete="off"
-spellcheck="false" placeholder="Filter by task, step, title, or path"><kbd>/</kbd></label>
-<div class="status"><span id="count" data-all="{summary}">{summary}</span>
-<span class="hint"><kbd>/</kbd> search <kbd>esc</kbd> clear <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move
-<kbd>enter</kbd> open</span></div>
-{render_chips(pages)}
+<link rel="icon" href="{FAVICON}">
+<link rel="stylesheet" href="/_askai/index.css"></head><body>
+<header class="top">
+  <div><div class="eyebrow">_askai</div><h1>Workspace pages</h1></div>
+  <details class="how"><summary>How this page works</summary><div class="howbody">
+    <p>Every page under {folders}, newest task first, served with Ask AI: select any passage on a page to ask about it. Each page keeps its own threads in a database beside it.</p>
+    <p>The coloured bar on each task is its category. Hover a category button to see where its tasks are; click it to keep only them, across the full width, with every step listed. Click it again, or press Esc, to go back to both columns.</p>
+    <p>A task with more than one page has an arrow at the start of its line. Click it, or press &#8594;, to list its steps and pages without leaving this page.</p>
+    <p>To move a task, drag it onto a category button, or click its category name. Moves are saved to <code>{data["file"]}</code>. A dotted bar means Claude filed the task as a guess.</p>
+  </div></details>
+  <div class="seg" role="group" aria-label="Steps"><span class="lbl">Steps</span>
+    <button type="button" data-steps="newest" aria-pressed="true">Newest only</button>
+    <button type="button" data-steps="all" aria-pressed="false">All</button>
+  </div>
+</header>
+<div class="search" id="search">
+  <label class="field" for="q">{SEARCH_ICON}<input id="q" type="search" autocomplete="off"
+  spellcheck="false" placeholder="Filter by task, step, title or category"><kbd>/</kbd></label>
+  <div class="status"><span id="count"></span><span class="hint"><kbd>/</kbd> search <kbd>esc</kbd> clear
+  <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move <kbd>&#8594;</kbd><kbd>&#8592;</kbd> steps <kbd>enter</kbd> open
+  <kbd>&#8997;1-9</kbd> category <span>&middot; drag a task onto a button to move it</span></span></div>
+  <div class="bar" id="bar" role="toolbar" aria-label="Categories"></div>
 </div>
-{listing}
-<div id="empty" hidden>{"Nothing matches. Clear a filter above, or search a task number like <code>19</code>, a step name, or a word from the page title." if count else "No HTML deliverables found yet. Add one under <code>tasks/</code> and it appears here."}</div>
-</div><script>{INDEX_JS}</script></body></html>"""
+<main>
+  <div id="notice" class="notice" hidden></div>
+  <section id="unsorted" class="loose" hidden></section>
+  <div id="board" class="board"></div>
+  <div id="focus" class="focus" hidden></div>
+  <div id="others"></div>
+  <div id="empty" hidden>{"Nothing matches. Clear the search, or press Esc to see every category." if count else "No HTML deliverables found yet. Add one under <code>tasks/</code> and it appears here."}</div>
+</main>
+<div id="menu" class="menu" role="menu" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<noscript><ul class="fallback">{fallback}</ul></noscript>
+<script>window.ASKAI_INDEX = {script_json(data)};</script>
+<script src="/_askai/index.js"></script>
+</body></html>"""
     return body.encode("utf-8")
 
 
@@ -1668,6 +1472,10 @@ class Handler(BaseHTTPRequestHandler):
             self._rename(data)
             return
 
+        if path == "/api/categories":
+            self._categories(data)
+            return
+
         doc = resolve_doc(data.get("doc", ""))
         if not doc:
             self._json({"error": "unknown document"}, 400)
@@ -1701,17 +1509,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(render_task(task), "text/html; charset=utf-8")
 
-    def _rename(self, data: dict[str, Any]) -> None:
-        # This endpoint writes to disk, so it answers only pages this proxy
-        # served: a JSON body, which a cross-site form cannot send, and, when the
+    def _from_our_page(self) -> bool:
+        # The endpoints that write to disk answer only pages this proxy served:
+        # a JSON body, which a cross-site form cannot send, and, when the
         # browser names an origin, the same host that served the page.
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         origin = self.headers.get("Origin")
         host = self.headers.get("Host") or ""
-        if ctype != "application/json" or (origin and urlparse(origin).netloc != host):
+        return ctype == "application/json" and not (origin and urlparse(origin).netloc != host)
+
+    def _rename(self, data: dict[str, Any]) -> None:
+        if not self._from_our_page():
             self._json({"error": "Renaming only works from a page this proxy served."}, 403)
             return
         status, body = rename_step(data.get("task", ""), data.get("step"), data.get("title"))
+        self._json(body, status)
+
+    def _categories(self, data: dict[str, Any]) -> None:
+        if not self._from_our_page():
+            self._json({"error": "Categories can only be changed from a page this proxy served."}, 403)
+            return
+        status, body = change_categories(data.get("action"), data)
         self._json(body, status)
 
     # -- /api/ask ---------------------------------------------------------

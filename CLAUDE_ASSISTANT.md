@@ -120,7 +120,7 @@ When it says `non-technical`:
 - Never show raw shell, git, or code unless they ask. Describe what you did in plain language - "saved and backed up" rather than "committed and pushed".
 - **Do the git work for them.** After delivering a step, stage, commit, and push it yourself, then tell them it's backed up.
 - **Do the R2 uploads for them** with `./bin/r2`, where it exists - don't ask them to run it.
-- `.env`: ask them to paste each value and write the file yourself. Never print a key back.
+- `.env`: never ask them to paste a key into the chat - a key typed there is already in the transcript, and not repeating it afterwards cannot undo that. Keys from the setup form are written by `python3 setup/apply-secrets.py`. For a key the form does not ask for, add its name with nothing after the `=` to `.env`, open the file for them with `open -e .env`, and ask them to paste the key after the `=` and save. Check that the line is no longer empty; never print it.
 - If something needs installing, either do it or walk them through one step at a time.
 - Always end a step with a working `index.html` and offer to open it in the browser.
 

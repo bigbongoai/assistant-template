@@ -65,6 +65,24 @@ else
   printf '                 echo "127.0.0.1 pa.lcl" | sudo tee -a /etc/hosts\n'
 fi
 
+# Older workspaces kept the person's file as _personal.md; it is _user.md now.
+# Rename it once, through git so its history follows, and only when _user.md
+# does not exist yet. Never overwrites: if both exist, both are left alone.
+if [ -e _personal.md ] && [ ! -e _user.md ]; then
+  if git ls-files --error-unmatch _personal.md >/dev/null 2>&1; then
+    git mv _personal.md _user.md
+    printf '  + %-10s renamed from _personal.md (staged, not yet committed)\n' "_user.md"
+  else
+    mv _personal.md _user.md
+    printf '  + %-10s renamed from _personal.md\n' "_user.md"
+  fi
+elif [ -e _personal.md ]; then
+  printf '  ! %-10s both _personal.md and _user.md exist; left alone.\n' "_user.md"
+  printf '                 Move anything you still need from _personal.md into _user.md, then delete it.\n'
+else
+  printf '  = %-10s in place\n' "_user.md"
+fi
+
 echo
 if grep -q 'SETUP-REQUIRED' _user.md 2>/dev/null; then
   cat <<'EOF'

@@ -44,8 +44,10 @@ None of it is permanent — say *"set me up again"* to change any answer.
 ## How tasks are organised
 
 ```
+_tasks.md                        ← one paragraph per task
 tasks/
 └── 01.my-task/
+    ├── CLAUDE.md                ← everything about this task, current position first
     ├── 01-first-round/
     │   ├── notes.md
     │   └── index.html           ← visual explainer for this round
@@ -57,6 +59,7 @@ tasks/
 ```
 
 - New topic → new numbered task folder. New round on an existing task → new numbered step folder inside it, so earlier rounds are never overwritten.
+- Each task keeps its whole record in its own `CLAUDE.md`, opening with where it stands. Claude Code loads that file by itself as soon as any file in the task is opened, and never otherwise, so one task's details cost nothing while you work on another. `_tasks.md`, which loads every time, keeps one short paragraph per task.
 - Each step's deliverable is a self-contained `index.html`, built with the `bb-visual-explainer` skill:
   no network requests, sidebar navigation, light and dark themes, and a print stylesheet.
 
@@ -85,6 +88,24 @@ git push                  # your tasks, to your own repo
 ```
 
 They never cross. Your tasks are yours; the system flows one way, from the template out.
+
+### If your copy is older than September 2026
+
+One update changed three things you own.
+Each happens once.
+
+- **`_personal.md` is now `_user.md`.**
+  `git pull upstream main` normally carries your file across under its new name, your lines included.
+  If you still have `_personal.md` afterwards, run `./setup.sh`: it renames the file with `git mv`, but only when `_user.md` does not exist yet, so it is safe to run again.
+  Claude does the same rename at the start of a session if it finds only `_personal.md`.
+- **`CLAUDE.md` lost its "My rules" section.**
+  It now holds only the line `@CLAUDE_ASSISTANT.md` and a pointer to `_user.md`, and your own rules go in the "My rules" section of `_user.md`.
+  This breaks the old promise that updates never touch `CLAUDE.md`.
+  If you never edited it, the pull takes the new version without asking.
+  If you wrote anything under "My rules", the pull stops with a merge conflict in `CLAUDE.md`.
+  To finish it: copy your lines into the "My rules" section of `_user.md`, make `CLAUDE.md` match the template's version, then `git add CLAUDE.md _user.md` and `git commit`.
+- **Each task now keeps its details in its own `tasks/NN.name/CLAUDE.md`**, and `_tasks.md` keeps one short paragraph per task.
+  Nothing moves by itself: your existing `_tasks.md` stays as it is until you ask Claude to move each task's details into its own file.
 
 ## Adopting this for your team
 
@@ -125,12 +146,12 @@ Two things worth knowing: credentials in that file end up in a teammate's `.env`
 
 | File / folder | Purpose |
 | --- | --- |
-| `CLAUDE_ASSISTANT.md` | System instructions Claude reads every session — onboarding, profiles, task workflow, delivery rules. Maintained centrally; updates arrive by `git pull upstream main`, so don't edit it |
-| `CLAUDE.md` | Yours. Imports `CLAUDE_ASSISTANT.md` on one line, then whatever rules you want to add. Never overwritten by an update |
+| `CLAUDE_ASSISTANT.md` | System instructions Claude reads every session - onboarding, profiles, task workflow, delivery rules, and which file holds what. Maintained centrally; updates arrive by `git pull upstream main`, so don't edit it |
+| `CLAUDE.md` | Imports `CLAUDE_ASSISTANT.md` and nothing else. Leave it as it is |
 | `assistant.config.json` | Generic defaults. An `assistant.config.local.json` beside it (gitignored) overrides them for a team |
-| `_user.md` | Your preferences and profile. Claude fills it in during setup, then keeps adding to it |
-| `_tasks.md` | Index of your tasks, kept updated by Claude |
-| `tasks/` · `archive/` | Your work, active and archived |
+| `_user.md` | Yours: your profile, your setup answers, your preferences and your own rules. Claude fills it in during setup, then keeps adding to it. Where it disagrees with the shared instructions, it wins |
+| `_tasks.md` | One paragraph per task, kept updated by Claude |
+| `tasks/` · `archive/` | Your work, active and archived. Each task folder has its own `CLAUDE.md` holding everything about that task |
 | `examples/` | Two worked examples of the conventions. Reference only |
 | `bin/r2` · `bin/archive` | Storage helper and archiver |
 | `setup/` | The onboarding page and its local server |

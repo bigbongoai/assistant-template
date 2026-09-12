@@ -26,25 +26,17 @@ profiles" in `CLAUDE.md`.
 - Default shipping address, courier or pickup point, phone:
 - Billing / invoicing details:
 
-## Task Organization (already wired in — keep or edit)
-- Tasks live in numbered folders: `tasks/01.task-name/`
-- Steps within a task: `01-step-name/`, `02-step-name/`, …
-- `source-code/` inside a step = input assets you provided + helper scripts worth keeping
-- `temp/` inside a step = throwaway intermediate artifacts (gitignored)
-- `_tasks.md` is the index of all tasks
-- Read the full task folder before discussing a task
+## Setup answers
+Written by setup so no later session asks again. Say "set me up again" to change them.
+- Profile: the **Profile:** line at the top of this file
+- Affiliation: _unset_ - `org` (and which one) or `independent`
+- Backup: _unset_ - `github` (and which repo) or `local`
+- Storage: _unset_ - `org`, `own` or `none`
+- Publish: _unset_ - `briefings` or `none`
 
-## Web Access
-- When a site returns 403 / blocks scraping, use Playwright (real browser) to fetch it
-- Extract content programmatically once the page loads
-
-## Results Presentation
-- **Every task gets a visual explainer, built with the `bb-visual-explainer` skill** - default, not on request
-- Skill rules that override older habits: self-contained HTML, zero network requests (so no Tailwind CDN), left sidebar
-  where each nav item is its own JS-switched page, dark-primary theme with toggle, print stylesheet, glossary
-- Each step folder gets its own `index.html`
-- Test deliverables with Playwright before presenting — verify links work and images
-  render; capture screenshots
+## My rules
+Anything written here overrides the shared instructions: preferred tone, tools to avoid,
+people and projects worth knowing about, house style for deliverables.
 
 ---
 

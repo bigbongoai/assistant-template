@@ -92,7 +92,8 @@ The categories, and which task is in which, live in one file at the workspace ro
 - One file rather than a line in each task's `_task.json`, because a task that is its own git repository must never be written into, and it still needs a category.
 - `tasks` is keyed by task folder name. `guess` marks a task Claude filed without being sure; the page draws it with a dotted bar until it is moved or kept.
 - `color` is one of blue, amber, teal, rose, violet, green or slate. `holds` is the line Claude reads when it files a new task.
-- With no file, every task shows as not sorted, and the first category added from the page creates it.
+- **Manage categories**, at the end of the category buttons, opens one list to rename each category, give it a colour, move it to the other column, write what goes in it (the line Claude reads when it files a task), add a new one and delete an empty one. Every change is saved as it is made, and a new category has no column until one is picked.
+- With no file, every task shows as not sorted, and the first category added in that list creates it.
 - The page writes the file through `POST /api/categories`, atomically, then draws what is on disk. Like the step rename, it only accepts a JSON body from a page this proxy served.
 - A file that does not parse is named at the top of the page and never written over.
 - `node _askai/tests/index.e2e.mjs` checks all of this in a real browser, against a throwaway copy of the workspace.

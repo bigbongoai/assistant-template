@@ -125,26 +125,51 @@ async function pick(p, text) {
     await settle(p);
     check('dragging a task onto a button moves it on disk', onDisk(root).tasks['01.alpha'].category === 'home');
 
-    await p.click('.chip.add');
-    await p.fill('.addform input', 'Paddle');
-    await p.keyboard.press('Enter');
+    await p.click('.chip.manage');
+    await settle(p);
+    check('Manage categories opens a list of every category',
+      !(await p.$eval('#manage', m => m.hidden)) && (await p.$$('#manage .mgr-row')).length === 2);
+    await p.fill('#manage .mgr-add .nm', 'Paddle');
+    check('a new category cannot be added until its column is chosen',
+      await p.$eval('#manage .mgr-add .go', b => b.disabled) && await p.$eval('#manage .mgr-add .why', w => !w.hidden));
+    await p.click('#manage .mgr-add [data-side="private"]');
+    await p.fill('#manage .mgr-add .hd', 'Padel games');
+    await p.click('#manage .mgr-add .go');
     await settle(p);
     const added = onDisk(root).categories.find(c => c.name === 'Paddle');
-    check('+ New writes a category with a side and a colour', added && added.side === 'work' && added.color === 'amber', added);
-    await p.dblclick(`.chip[data-cat="${added.id}"]`);
-    await p.fill('.chip.editing input', 'Padel');
+    check('the new category is written with the column that was picked',
+      added && added.side === 'private' && added.holds === 'Padel games' && added.color === 'amber', added);
+    const row = `#manage .mgr-row[data-id="${added.id}"]`;
+    const saved = () => onDisk(root).categories.find(c => c.id === added.id);
+    await p.fill(`${row} .nm`, 'Padel');
     await p.keyboard.press('Enter');
     await settle(p);
-    check('double-click renames it on disk', onDisk(root).categories.some(c => c.id === added.id && c.name === 'Padel'));
-    await p.click('.chip[data-cat="home"]', { button: 'right' });
-    await p.waitForTimeout(150);
-    check('a category with tasks cannot be deleted', await p.evaluate(() => [...document.querySelectorAll('#menu button')]
-      .find(b => b.textContent.includes('Delete')).disabled));
-    await p.keyboard.press('Escape');
-    await p.click(`.chip[data-cat="${added.id}"]`, { button: 'right' });
-    await p.waitForTimeout(150);
-    await pick(p, 'Delete');
+    check('renaming it in the list saves it', saved().name === 'Padel');
+    await p.click(`${row} [data-side="work"]`);
+    await settle(p);
+    check('moving it to the other column saves it', saved().side === 'work');
+    await p.click(`${row} .sw`);
+    await p.click(`${row} .pal [data-color="green"]`);
+    await settle(p);
+    check('changing its colour saves it', saved().color === 'green');
+    await p.fill(`${row} .hd`, 'Padel, the sport');
+    await p.keyboard.press('Tab');
+    await settle(p);
+    check('changing what goes in it saves it', saved().holds === 'Padel, the sport');
+    check('a category with tasks cannot be deleted', await p.$eval('#manage .mgr-row[data-id="home"] .del', b => b.disabled));
+    await p.click(`${row} .del`);
+    await settle(p);
     check('an empty category is deleted from disk', !onDisk(root).categories.some(c => c.id === added.id));
+    await p.keyboard.press('Escape');
+    await settle(p);
+    check('Esc closes the list', await p.$eval('#manage', m => m.hidden));
+    await p.dblclick('.chip[data-cat="acme"]');
+    await p.fill('.chip.editing input', 'Acme Co');
+    await p.keyboard.press('Enter');
+    await settle(p);
+    check('double-clicking a button still renames it on disk', onDisk(root).categories.find(c => c.id === 'acme').name === 'Acme Co');
+    await p.keyboard.press('Escape');
+    await settle(p);
 
     const before = readFileSync(join(root, '_categories.json'), 'utf8');
     const foreign = await fetch(url + 'api/categories', {
@@ -192,12 +217,15 @@ async function pick(p, text) {
   try {
     const p = await open(url);
     check('with no file, every task is under Not sorted', (await idsIn(p, '#unsorted')).length === 3);
-    await p.click('.chip.add');
-    await p.fill('.addform input', 'First');
-    await p.keyboard.press('Enter');
+    await p.click('.chip.manage');
+    await p.fill('#manage .mgr-add .nm', 'First');
+    await p.click('#manage .mgr-add [data-side="work"]');
+    await p.click('#manage .mgr-add .go');
     await settle(p);
     check('the first category creates the file', existsSync(join(root, '_categories.json')) &&
       onDisk(root).categories.length === 1 && onDisk(root).sides.length === 2);
+    await p.keyboard.press('Escape');
+    await settle(p);
     await p.dragAndDrop('.row[data-id="tasks/02.beta"]', '.chip[data-cat="first"]');
     await settle(p);
     check('and a task can then be dragged into it', onDisk(root).tasks['02.beta']?.category === 'first');

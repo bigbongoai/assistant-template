@@ -1021,6 +1021,14 @@ def apply_category_change(raw: dict[str, Any], action: Any, data: dict[str, Any]
             if data.get("side") not in side_ids:
                 return "There is no such side."
             target["side"] = data["side"]
+        if "color" in data:
+            if data.get("color") not in PALETTE:
+                return "There is no such colour."
+            target["color"] = data["color"]
+        if "holds" in data:
+            if not isinstance(data.get("holds"), str):
+                return "Send what goes here as text."
+            target["holds"] = clean_text(data["holds"], 240)
         return ""
 
     if action == "delete":

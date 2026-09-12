@@ -245,8 +245,9 @@
       });
       html += '</span>';
     });
-    html += '<span class="sep" aria-hidden="true"></span><span class="addwrap">' +
-      '<button type="button" class="chip add" title="Add a category">+ New</button></span>';
+    html += '<span class="sep" aria-hidden="true"></span>' +
+      '<button type="button" class="chip manage" title="Rename, recolour, move, describe, add or delete categories">' +
+      'Manage categories</button>';
     bar.innerHTML = html;
   }
   function counts() {
@@ -359,7 +360,7 @@
     if (loose.length) {
       looseEl.appendChild(panel('loose', '<span class="colname">Not sorted</span><span class="c">' + loose.length +
         '</span><span class="note">' + (cats.length ? 'Drag each onto a category, or click "Not sorted" on it'
-          : 'Add a category with + New, then drag tasks onto it') + '</span>', loose));
+          : 'Add a category with Manage categories, then drag tasks onto it') + '</span>', loose));
     }
     var used = usedSides();
     board.style.setProperty('--cols', Math.max(1, used.length));
@@ -571,7 +572,7 @@
           action: function () { moveTask(id, c.id); } });
       });
     });
-    if (!cats.length) { items.push({ label: 'No categories yet: add one with + New', icon: '', disabled: true }); }
+    if (!cats.length) { items.push({ label: 'No categories yet: add one with Manage categories', icon: '', disabled: true }); }
     openMenu(anchor, items);
   }
 
@@ -589,6 +590,7 @@
     }
     items.push({ label: 'Delete', icon: '×', disabled: n > 0, note: n > 0 ? 'only when empty' : '',
       action: function () { deleteCat(c.id); } });
+    items.push({ label: 'Manage categories', icon: '\u2699', action: function () { openManager(b); } });
     openMenu(b, items);
   }
 
@@ -602,16 +604,23 @@
     cats = doc.categories;
     placed = doc.tasks || {};
   }
+  /* Changes go one at a time, in order, so an answer that arrives late can
+     never draw an older state over a newer one. */
+  var queue = Promise.resolve();
   function post(body) {
-    return fetch('/api/categories', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-    }).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (j) {
-        adopt(j);
-        if (r.status !== 200 || !j.ok) { throw new Error(j.error || 'The change was not saved.'); }
-        return j;
+    var sent = queue.then(function () {
+      return fetch('/api/categories', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          adopt(j);
+          if (r.status !== 200 || !j.ok) { throw new Error(j.error || 'The change was not saved.'); }
+          return j;
+        });
       });
     });
+    queue = sent.catch(function () { /* the caller reports it */ });
+    return sent;
   }
   function refuse() {
     toast('Nothing can be changed until ' + DATA.file + ' is fixed: ' + DATA.error, null, true);
@@ -624,6 +633,7 @@
     return post(body).then(function () {
       renderBar();
       render(true);
+      refreshManager();
       if (afterRender) { afterRender(); }
       if (done) {
         toast(done, undoBody ? function () {
@@ -633,6 +643,7 @@
     }).catch(function (err) {
       renderBar();
       render(true);
+      refreshManager();
       toast(err.message, null, true);
     });
   }
@@ -708,51 +719,222 @@
   }
 
   /* ------------------------------------------------ new and renamed categories */
-  function openAdd() {
+  /* ------------------------------------------------- managing the categories */
+  /* One list to rename, recolour, move between the columns, describe, add and
+     delete categories. Every change is saved as it is made. Nothing is picked
+     for the person: a new category has no column until they choose one. */
+  var PALETTE = ['blue', 'amber', 'teal', 'rose', 'violet', 'green', 'slate'];
+  var manageEl = null, manageFrom = null, addSide = null;
+  function sidePick(current) {
+    return '<span class="sidepick" role="group" aria-label="Column">' + sides.map(function (s) {
+      return '<button type="button" data-side="' + esc(s.id) + '" aria-pressed="' + (s.id === current) + '">' +
+        esc(s.name) + '</button>';
+    }).join('') + '</span>';
+  }
+  function openManager(from) {
     if (locked && refuse()) { return; }
-    var wrap = $('.addwrap', bar), side = sides[0].id;
-    wrap.innerHTML = '<form class="addform"><input aria-label="Name of the new category" placeholder="New category" maxlength="30">' +
-      '<span class="sidepick" role="group" aria-label="Side">' + sides.map(function (s) {
-        return '<button type="button" data-pick="' + esc(s.id) + '" aria-pressed="' + (s.id === side) + '">' + esc(s.name) + '</button>';
-      }).join('') + '</span><button type="submit" class="go">Add</button></form>';
-    var form = $('form', wrap), input = $('input', form);
-    input.focus();
-    function cancel() { renderBar(); render(false); }
-    form.addEventListener('click', function (e) {
-      var p = e.target.closest('[data-pick]');
-      if (!p) { return; }
-      side = p.dataset.pick;
-      $$('[data-pick]', form).forEach(function (x) { x.setAttribute('aria-pressed', x === p); });
-      input.focus();
+    closeMenu(false);
+    manageFrom = from || document.activeElement;
+    if (!manageEl) {
+      manageEl = document.createElement('div');
+      manageEl.className = 'mgr-overlay';
+      manageEl.id = 'manage';
+      document.body.appendChild(manageEl);
+      manageEl.addEventListener('mousedown', function (e) { if (e.target === manageEl) { closeManager(); } });
+      manageEl.addEventListener('click', onManageClick);
+      manageEl.addEventListener('keydown', onManageKey);
+      manageEl.addEventListener('focusout', function (e) { if (e.target.matches('.mgr-row input')) { saveField(e.target); } });
+      manageEl.addEventListener('input', function (e) { if (e.target.closest('.mgr-add')) { paintAdd(); } });
+      manageEl.addEventListener('submit', onManageSubmit);
+    }
+    addSide = null;
+    manageEl.hidden = false;
+    renderManager();
+    $('.mgr', manageEl).focus();
+  }
+  function closeManager() {
+    if (!manageEl || manageEl.hidden) { return; }
+    var active = document.activeElement;
+    if (active && active.matches && active.matches('.mgr-row input')) { saveField(active); }
+    manageEl.hidden = true;
+    var back = manageFrom && manageFrom.isConnected ? manageFrom : $('.chip.manage', bar);
+    if (back) { back.focus(); }
+  }
+  function refreshManager() { if (manageEl && !manageEl.hidden) { renderManager(); } }
+  function renderManager() {
+    var active = manageEl.contains(document.activeElement) ? document.activeElement : null;
+    var keep = active && active.dataset.field ? { id: active.closest('[data-id]') ? active.closest('[data-id]').dataset.id : null,
+      field: active.dataset.field, start: active.selectionStart, end: active.selectionEnd } : null;
+    var old = $('.mgr-add', manageEl);
+    var pending = old ? { name: $('.nm', old).value, holds: $('.hd', old).value } : { name: '', holds: '' };
+    var held = {};
+    tasks.forEach(function (t) { var c = catOf(t); if (c) { held[c.id] = (held[c.id] || 0) + 1; } });
+    var either = sides.map(function (s) { return esc(s.name); }).join(' or ');
+    var html = '<div class="mgr" role="dialog" aria-modal="true" aria-labelledby="mgr-title" tabindex="-1">' +
+      '<header class="mgr-head"><h2 id="mgr-title">Categories</h2><p>Each category sits in one column, ' + either +
+      '. Claude reads "What goes here" when it files a new task.</p>' +
+      '<button type="button" class="mgr-x" aria-label="Close">×</button></header>' +
+      '<div class="mgr-cols" aria-hidden="true"><span></span><span>Name</span><span>Column</span>' +
+      '<span>What goes here</span><span>Tasks</span><span></span></div>';
+    sides.forEach(function (s) {
+      var mine = cats.filter(function (c) { return c.side === s.id; });
+      if (!mine.length) { return; }
+      html += '<div class="mgr-group">' + esc(s.name) + '</div>';
+      mine.forEach(function (c) {
+        var n = held[c.id] || 0;
+        html += '<div class="mgr-row" data-id="' + esc(c.id) + '" style="--cc:' + colorVar(c) + '">' +
+          '<button type="button" class="sw" aria-expanded="false" aria-label="Colour: ' + c.color +
+          '. Change it" title="Change the colour"><i class="dot"></i></button>' +
+          '<input class="nm" data-field="name" maxlength="30" aria-label="Name" value="' + esc(c.name) + '">' +
+          sidePick(c.side) +
+          '<input class="hd" data-field="holds" maxlength="240" aria-label="What goes here"' +
+          ' placeholder="What belongs here, in a few words" value="' + esc(c.holds || '') + '">' +
+          '<span class="n">' + plural(n, 'task') + '</span>' +
+          '<button type="button" class="del"' + (n ? ' disabled title="Move its ' + plural(n, 'task') +
+            ' to another category first"' : ' title="Delete ' + esc(c.name) + '"') + '>Delete</button></div>';
+      });
     });
-    form.addEventListener('keydown', function (e) {
-      e.stopPropagation();
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-    });
-    form.addEventListener('focusout', function () {
-      setTimeout(function () {
-        if (form.isConnected && !form.contains(document.activeElement) && !input.value.trim()) { cancel(); }
-      }, 0);
-    });
-    form.addEventListener('submit', function (e) {
+    if (!cats.length) { html += '<p class="none">No categories yet. Add the first one below.</p>'; }
+    html += '<form class="mgr-add" autocomplete="off"><span class="sw" aria-hidden="true"></span>' +
+      '<input class="nm" data-field="new-name" maxlength="30" aria-label="Name of the new category" placeholder="New category">' +
+      sidePick(addSide) +
+      '<input class="hd" data-field="new-holds" maxlength="240" aria-label="What goes in the new category" placeholder="What goes here">' +
+      '<span class="n"></span><button type="submit" class="go">Add</button>' +
+      '<p class="why" hidden>Pick ' + either + ' for it first.</p></form>' +
+      '<footer class="mgr-foot"><span>Every change is saved as you make it, to ' + esc(DATA.file) + '.</span>' +
+      '<button type="button" class="done">Done</button></footer></div>';
+    manageEl.innerHTML = html;
+    $('.mgr-add .nm', manageEl).value = pending.name;
+    $('.mgr-add .hd', manageEl).value = pending.holds;
+    paintAdd();
+    if (keep) {
+      var back = keep.id ? $('.mgr-row[data-id="' + keep.id + '"] [data-field="' + keep.field + '"]', manageEl) :
+        $('.mgr-add [data-field="' + keep.field + '"]', manageEl);
+      if (back) {
+        back.focus();
+        try { back.setSelectionRange(keep.start, keep.end); } catch (e) { /* not a text field */ }
+      }
+    }
+  }
+  function paintAdd() {
+    var form = $('.mgr-add', manageEl), name = $('.nm', form).value.trim();
+    $('.go', form).disabled = !name || !addSide;
+    $('.why', form).hidden = !(name && !addSide);
+  }
+  function flashRow(id) {
+    var r = manageEl && $('.mgr-row[data-id="' + id + '"]', manageEl);
+    if (!r) { return; }
+    r.classList.remove('saved');
+    void r.offsetWidth;
+    r.classList.add('saved');
+  }
+  function update(id, fields, done, undo) {
+    var body = { action: 'update', id: id }, back = null;
+    Object.keys(fields).forEach(function (k) { body[k] = fields[k]; });
+    if (undo) {
+      back = { action: 'update', id: id };
+      Object.keys(undo).forEach(function (k) { back[k] = undo[k]; });
+    }
+    return change(body, done, back, function () { flashRow(id); });
+  }
+  /* A name or a description is saved when the field is left, or on Enter. */
+  function saveField(input) {
+    var row = input.closest('.mgr-row'), c = row && catById(row.dataset.id);
+    if (!c) { return; }
+    var field = input.dataset.field, value = input.value.trim(), old = field === 'name' ? c.name : (c.holds || '');
+    if (value === old || value === input.dataset.sent) { return; }
+    if (field === 'name' && !value) { input.value = c.name; toast('A category needs a name.', null, true); return; }
+    input.dataset.sent = value;
+    var fields = {}, undo = {};
+    fields[field] = value;
+    undo[field] = old;
+    update(c.id, fields, field === 'name' ? 'Renamed ' + old + ' to ' + value : 'Saved what goes in ' + c.name, undo);
+  }
+  function onManageClick(e) {
+    var t = e.target;
+    if (t.closest('.mgr-x') || t.closest('.done')) { closeManager(); return; }
+    var pickBtn = t.closest('.sidepick button');
+    if (pickBtn && t.closest('.mgr-add')) {
+      addSide = pickBtn.dataset.side;
+      $$('.mgr-add .sidepick button', manageEl).forEach(function (b) { b.setAttribute('aria-pressed', b === pickBtn); });
+      paintAdd();
+      $('.mgr-add .nm', manageEl).focus();
+      return;
+    }
+    var row = t.closest('.mgr-row'), c = row && catById(row.dataset.id);
+    if (!c) { return; }
+    if (pickBtn) {
+      if (pickBtn.dataset.side !== c.side) {
+        update(c.id, { side: pickBtn.dataset.side }, c.name + ' is now under ' + sideName(pickBtn.dataset.side), { side: c.side });
+      }
+      return;
+    }
+    var colour = t.closest('.pal button');
+    if (colour) {
+      if (colour.dataset.color !== c.color) { update(c.id, { color: colour.dataset.color }); } else { $('.pal', row).remove(); }
+      return;
+    }
+    if (t.closest('.sw')) {
+      var had = $('.pal', row);
+      $$('.pal', manageEl).forEach(function (x) { x.remove(); });
+      $$('.sw[aria-expanded="true"]', manageEl).forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+      if (had) { return; }
+      var pal = document.createElement('div');
+      pal.className = 'pal';
+      pal.innerHTML = PALETTE.map(function (name) {
+        return '<button type="button" data-color="' + name + '" style="--cc:var(--cat-' + name + ')" aria-pressed="' +
+          (name === c.color) + '" aria-label="' + name + '" title="' + name + '"></button>';
+      }).join('');
+      row.appendChild(pal);
+      $('.sw', row).setAttribute('aria-expanded', 'true');
+      return;
+    }
+    var del = t.closest('.del');
+    if (del && !del.disabled) { deleteCat(c.id); }
+  }
+  function onManageKey(e) {
+    e.stopPropagation();
+    var t = e.target;
+    if (e.key === 'Escape') {
       e.preventDefault();
-      var name = input.value.trim();
-      if (!name) { input.focus(); return; }
-      var had = cats.map(function (c) { return c.id; });
-      post({ action: 'add', name: name, side: side }).then(function () {
-        var added = cats.filter(function (c) { return had.indexOf(c.id) === -1; })[0];
-        renderBar();
-        render(true);
-        var chip = added && $('.chip[data-cat="' + added.id + '"]', bar);
-        if (chip && !REDUCE) {
-          chip.animate([{ transform: 'scale(.6)', opacity: 0 }, { transform: 'none', opacity: 1 }],
-            { duration: 240, easing: 'cubic-bezier(.2,.8,.3,1.3)' });
-        }
-        toast('Added ' + name + ' under ' + sideName(side) + '. Drag tasks onto it.', added ? function () {
-          change({ action: 'delete', id: added.id });
-        } : null);
-      }).catch(function (err) { toast(err.message, null, true); input.focus(); });
-    });
+      if ($('.pal', manageEl)) {
+        $$('.pal', manageEl).forEach(function (x) { x.remove(); });
+        $$('.sw', manageEl).forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+        return;
+      }
+      if (t.matches && t.matches('.mgr-row input')) {
+        var c = catById(t.closest('.mgr-row').dataset.id);
+        t.value = t.dataset.field === 'name' ? c.name : (c.holds || '');
+        $('.mgr', manageEl).focus();
+        return;
+      }
+      closeManager();
+      return;
+    }
+    if (e.key === 'Enter' && t.matches && t.matches('.mgr-row input')) {
+      e.preventDefault();
+      saveField(t);
+    }
+  }
+  function onManageSubmit(e) {
+    e.preventDefault();
+    var form = e.target, name = $('.nm', form).value.trim(), holds = $('.hd', form).value.trim(), side = addSide;
+    if (!name || !side) { paintAdd(); (side ? $('.nm', form) : $('.sidepick button', form)).focus(); return; }
+    var had = cats.map(function (c) { return c.id; });
+    post({ action: 'add', name: name, side: side, holds: holds }).then(function () {
+      var added = cats.filter(function (c) { return had.indexOf(c.id) === -1; })[0];
+      addSide = null;
+      $('.nm', form).value = '';
+      $('.hd', form).value = '';
+      renderBar();
+      render(true);
+      renderManager();
+      if (added) { flashRow(added.id); }
+      $('.mgr-add .nm', manageEl).focus();
+      toast('Added ' + name + ' under ' + sideName(side) + '. Drag tasks onto it.', added ? function () {
+        change({ action: 'delete', id: added.id });
+      } : null);
+    }).catch(function (err) { renderManager(); toast(err.message, null, true); });
   }
   /* The button becomes a small text field in place: Enter keeps, Esc drops. */
   function startRename(id) {
@@ -813,8 +995,8 @@
   /* --------------------------------------------------------------- clicks */
   bar.addEventListener('click', function (e) {
     var b = e.target.closest('button');
-    if (!b || b.closest('.addform') || e.detail > 1) { return; }
-    if (b.classList.contains('add')) { openAdd(); return; }
+    if (!b || e.detail > 1) { return; }
+    if (b.classList.contains('manage')) { openManager(b); return; }
     if (b.dataset.all) { setSel({ kind: 'all' }); return; }
     if (b.classList.contains('side')) {
       var s = b.dataset.side;
@@ -916,6 +1098,7 @@
   }
 
   document.addEventListener('keydown', function (e) {
+    if (manageEl && !manageEl.hidden) { if (e.key === 'Escape') { closeManager(); } return; }
     if (!menu.hidden) { return; }
     var active = document.activeElement, typing = active === q;
     if (active && active.tagName === 'INPUT' && !typing) { return; }

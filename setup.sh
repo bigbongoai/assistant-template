@@ -66,7 +66,7 @@ else
 fi
 
 echo
-if grep -q 'SETUP-REQUIRED' _personal.md 2>/dev/null; then
+if grep -q 'SETUP-REQUIRED' _user.md 2>/dev/null; then
   cat <<'EOF'
 Next step — open Claude Code in this folder and say:
 

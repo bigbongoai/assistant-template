@@ -128,7 +128,7 @@ Two things worth knowing: credentials in that file end up in a teammate's `.env`
 | `CLAUDE_ASSISTANT.md` | System instructions Claude reads every session — onboarding, profiles, task workflow, delivery rules. Maintained centrally; updates arrive by `git pull upstream main`, so don't edit it |
 | `CLAUDE.md` | Yours. Imports `CLAUDE_ASSISTANT.md` on one line, then whatever rules you want to add. Never overwritten by an update |
 | `assistant.config.json` | Generic defaults. An `assistant.config.local.json` beside it (gitignored) overrides them for a team |
-| `_personal.md` | Your preferences and profile. Claude fills it in during setup, then keeps adding to it |
+| `_user.md` | Your preferences and profile. Claude fills it in during setup, then keeps adding to it |
 | `_tasks.md` | Index of your tasks, kept updated by Claude |
 | `tasks/` · `archive/` | Your work, active and archived |
 | `examples/` | Two worked examples of the conventions. Reference only |

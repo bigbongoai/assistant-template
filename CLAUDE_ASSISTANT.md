@@ -8,11 +8,11 @@ rules in `CLAUDE.md`, which imports this file and is yours to change freely.
 
 When Claude is asked to change how the assistant behaves in general, the edit
 belongs here. When it is a preference for one person or one workspace, it
-belongs in their `CLAUDE.md` or `_personal.md`.
+belongs in their `CLAUDE.md` or `_user.md`.
 
 ## Purpose
 
-@_personal.md
+@_user.md
 
 This directory is a workspace for personal-assistant style tasks. Expect a wide mix of work, including but not limited to:
 
@@ -31,7 +31,7 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 
 ## First run — set this workspace up
 
-**If `_personal.md` contains `<!-- SETUP-REQUIRED -->`, this workspace is unconfigured. Run setup before anything else — whatever their first message is, even if it's a task.** Acknowledge in one line ("Let me get you set up first — takes a minute"), then drive the whole thing yourself.
+**If `_user.md` contains `<!-- SETUP-REQUIRED -->`, this workspace is unconfigured. Run setup before anything else — whatever their first message is, even if it's a task.** Acknowledge in one line ("Let me get you set up first — takes a minute"), then drive the whole thing yourself.
 
 **The person should never be asked to run a command, edit a file, or read a path.** They click a link and fill in a form. Everything else is yours.
 
@@ -42,7 +42,7 @@ Be flexible across domains. Pick the right tool for each job (web search, file o
 3. **Wait for `setup/answers.json` to appear.** Poll every few seconds. Don't fill the screen with status chatter while waiting.
 4. **Apply the answers.** The form returns four routing fields - `affiliation`, `backup`, `storage`, `publish` - and each is independent. Handle every combination:
 
-   **Always:** write `_personal.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
+   **Always:** write `_user.md` from the answers; set `**Profile:**`; record their affiliation, backup and storage choices so later sessions don't re-ask; delete the `<!-- SETUP-REQUIRED -->` marker and the setup quote block.
 
    **`backup: github`** — create their repo and wire it up, doing the commands yourself:
    - `affiliation: org` → `gh repo create <github_org>/assistant-<name> --private`, taking `github_org` from the merged config (`assistant.config.json` overlaid with `assistant.config.local.json` if present)
@@ -83,7 +83,7 @@ Re-run this whenever they say "set me up again" or that the profile is wrong.
 
 ## Operating profiles
 
-Follow the profile recorded in `_personal.md`. When it says `technical`:
+Follow the profile recorded in `_user.md`. When it says `technical`:
 
 - Show commands, file paths, and code freely. Assume competence; skip the hand-holding.
 - Leave git to them. Mention when a step is worth committing, but don't commit unless asked.
@@ -106,7 +106,7 @@ When it says `non-technical`:
 ### Structure
 - **`tasks/`** — every task lives here in its own numbered folder
 - **`_tasks.md`** — flat index of all task folders (bullet list)
-- **`_personal.md`** — the user's preferences and working patterns (bullets, short and dense)
+- **`_user.md`** — the user's preferences and working patterns (bullets, short and dense)
 - **`_context/`** - background every task can draw on: the organisation, the people, standing facts. Read what is relevant there before asking the user for context they have already given. Its rules are in `_context/README.md`.
 
 ### Task Organization
@@ -139,7 +139,7 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 - Archived tasks stay in the repo and stay committed. Archiving is tidying, not deleting. Never delete a task folder unless the user explicitly asks.
 
 ### Personal Preferences
-- Maintained in `_personal.md`.
+- Maintained in `_user.md`.
 - Add patterns as you notice them: what the user prefers, how they like things done, what to avoid.
 - Keep bullets short and information-dense to save tokens.
 
@@ -147,7 +147,7 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 
 - **Every task ships a visual explainer, built with the `bb-visual-explainer` skill.** That is the default deliverable, not something to wait to be asked for. Invoke the skill before writing the page rather than hand-rolling a layout, and do not reach for a Tailwind CDN - it breaks the skill's zero-network-requests rule. Each step gets its own `index.html`; if the user asks for another round of info, create a new step folder with the next number and a new `index.html` rather than overwriting the previous one. Pair it with the Ask AI skill, which in this workspace is served by the shared proxy, so the page itself carries nothing.
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
-- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.) and the `_context/` folder.
+- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_user.md`, `_tasks.md`, `README.md`, `package.json`, etc.) and the `_context/` folder.
 
 ## Working cycle: local first, deploy in the background
 

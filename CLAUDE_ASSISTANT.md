@@ -107,6 +107,7 @@ When it says `non-technical`:
 - **`tasks/`** — every task lives here in its own numbered folder
 - **`_tasks.md`** — flat index of all task folders (bullet list)
 - **`_personal.md`** — the user's preferences and working patterns (bullets, short and dense)
+- **`_context/`** - background every task can draw on: the organisation, the people, standing facts. Read what is relevant there before asking the user for context they have already given. Its rules are in `_context/README.md`.
 
 ### Task Organization
 - Tasks in numbered folders: `tasks/01.task-name/`
@@ -146,7 +147,19 @@ When the user says "archive 5", "archive lego wheels", or similar, run `./bin/ar
 
 - **Every task ships a visual explainer, built with the `bb-visual-explainer` skill.** That is the default deliverable, not something to wait to be asked for. Invoke the skill before writing the page rather than hand-rolling a layout, and do not reach for a Tailwind CDN - it breaks the skill's zero-network-requests rule. Each step gets its own `index.html`; if the user asks for another round of info, create a new step folder with the next number and a new `index.html` rather than overwriting the previous one. Pair it with the Ask AI skill, which in this workspace is served by the shared proxy, so the page itself carries nothing.
 - **Test before presenting.** Before reporting a step as done, verify the deliverable: links resolve, images render. When the user says "test in Playwright", take screenshots and verify from the screenshots, not just from HTTP status.
-- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.).
+- **Never dump files in the repo root.** Everything belongs under `tasks/<task>/<step>/`. The root holds only the control files (`CLAUDE.md`, `_personal.md`, `_tasks.md`, `README.md`, `package.json`, etc.) and the `_context/` folder.
+
+## Working cycle: local first, deploy in the background
+
+For anything that also lives on a server, the order is fixed:
+
+1. **Build and test on the local copy.** The local Ask AI proxy is where the user reviews (`http://pa.lcl:1111/`, or `http://127.0.0.1:1111/`).
+2. **Report to the user.** They start reading and giving feedback from this point.
+3. **Then deploy with a background agent**, and relay its result when it lands.
+
+Never make the user wait through a deploy and its checks before they can see the work. If nothing has changed since the last deploy, say so rather than deploying again.
+
+The deploy itself: back up the live files first, copy, compare checksums in both directions, re-run the page's own checks against the live copy, and report what was done plus the command that undoes it.
 
 ## Publishing a page (briefings.page)
 

@@ -50,6 +50,12 @@ HOST_KEY = "BRIEFINGS_HOST"
 # task folder.
 MAX_NOTES = 40
 
+# Never shipped, whichever folder they sit in. A task's CLAUDE.md is its whole
+# internal record - decisions, prices, customer names - written for Claude, and
+# a published page is public to anyone holding the link. The local proxy still
+# reads it; only this upload leaves it out. Compared case-insensitively.
+NEVER_PUBLISHED = {"claude.md"}
+
 USER_AGENT = "briefings-publish/1.0"
 
 
@@ -290,7 +296,7 @@ def collect_notes(path):
     notes, seen = [], set()
     for folder in folders:
         for md in sorted(folder.glob("*.md")):
-            if md in seen:
+            if md in seen or md.name.lower() in NEVER_PUBLISHED:
                 continue
             seen.add(md)
             try:

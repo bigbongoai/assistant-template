@@ -224,8 +224,9 @@ server, and once the file leaves this machine the local proxy is no longer in th
   offer to take an old page down. That is the only time to mention money.
 - **The notes go with the page.** `bin/publish` sends the `.md` files from the step
   folder and the task folder, which is what the drawer is grounded in - the same
-  two layers the local proxy reads. Anything in those files is readable by anyone
-  who opens the page.
+  two layers the local proxy reads, except that a file named `CLAUDE.md` is never
+  sent: a task's whole internal record stays on this machine. Anything in the
+  files that are sent is readable by anyone who opens the page.
 - **Published pages are public.** Anyone with the link can read the page and its
   notes. Never publish client material, credentials, or personal data. Ask first
   if there is any doubt.

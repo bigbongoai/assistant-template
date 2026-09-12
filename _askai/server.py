@@ -1133,20 +1133,17 @@ def render_index() -> bytes:
   <details class="how"><summary>How this page works</summary><div class="howbody">
     <p>Every page under {folders}, newest task first, served with Ask AI: select any passage on a page to ask about it. Each page keeps its own threads in a database beside it.</p>
     <p>The coloured bar on each task is its category. Hover a category button to see where its tasks are; click it to keep only them, across the full width, with every step listed. Click it again, or press Esc, to go back to both columns.</p>
-    <p>A task with more than one page has an arrow at the start of its line. Click it, or press &#8594;, to list its steps and pages without leaving this page.</p>
+    <p>A task with more than one page has an arrow at the start of its line. Click it, or highlight the task with the arrow keys and press Space, to list its steps and pages without leaving this page. Enter opens the highlighted task.</p>
     <p>To move a task, drag it onto a category button, or click its category name. Moves are saved to <code>{data["file"]}</code>. A dotted bar means Claude filed the task as a guess.</p>
   </div></details>
-  <div class="seg" role="group" aria-label="Steps"><span class="lbl">Steps</span>
-    <button type="button" data-steps="newest" aria-pressed="true">Newest only</button>
-    <button type="button" data-steps="all" aria-pressed="false">All</button>
-  </div>
+  <button type="button" class="expand" id="expand" aria-expanded="false">Expand all</button>
 </header>
 <div class="search" id="search">
   <label class="field" for="q">{SEARCH_ICON}<input id="q" type="search" autocomplete="off"
   spellcheck="false" placeholder="Filter by task, step, title or category"><kbd>/</kbd></label>
   <div class="status"><span id="count"></span><span class="hint"><kbd>/</kbd> search <kbd>esc</kbd> clear
-  <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move <kbd>&#8594;</kbd><kbd>&#8592;</kbd> steps <kbd>enter</kbd> open
-  <kbd>&#8997;1-9</kbd> category <span>&middot; drag a task onto a button to move it</span></span></div>
+  <kbd>&#8593;</kbd><kbd>&#8595;</kbd> move <kbd>&#8592;</kbd><kbd>&#8594;</kbd> column <kbd>space</kbd> expand
+  <kbd>enter</kbd> open <span>&middot; drag a task onto a button to move it</span></span></div>
   <div class="bar" id="bar" role="toolbar" aria-label="Categories"></div>
 </div>
 <main>

@@ -64,7 +64,7 @@
     return id;
   }
   function colorVar(c) { return c ? 'var(--cat-' + c.color + ')' : 'var(--cat-none)'; }
-  /* The order of the buttons, which is also what the ⌥ digits count. */
+  /* The order of the buttons. */
   function orderedCats() {
     var out = [];
     sides.forEach(function (s) { cats.forEach(function (c) { if (c.side === s.id) { out.push(c); } }); });
@@ -156,7 +156,7 @@
     var tw = $('button.tw', a);
     if (tw) {
       tw.setAttribute('aria-expanded', shown.open);
-      tw.title = (shown.open ? 'Hide its steps (←)' : 'Show its steps (→)');
+      tw.title = (shown.open ? 'Hide its steps (space)' : 'Show its steps (space)');
     }
     if (!shown.open) { list.hidden = true; list.innerHTML = ''; return; }
     list.innerHTML = lines(shown.steps, 'sub');
@@ -179,11 +179,13 @@
           { duration: 200, easing: 'cubic-bezier(.2,.7,.2,1)' });
       }
       buildStops();
+      paintExpand();
       return;
     }
-    if (REDUCE) { paintSteps(t); buildStops(); return; }
+    if (REDUCE) { paintSteps(t); buildStops(); paintExpand(); return; }
     var h = list.offsetHeight;
     a.classList.remove('open');
+    paintExpand();
     list.animate([{ height: h + 'px', opacity: 1 }, { height: '0px', opacity: 0 }],
       { duration: 160, easing: 'ease-in' }).onfinish = function () { paintSteps(t); buildStops(); };
   }
@@ -229,18 +231,15 @@
 
   /* ------------------------------------------------------ category buttons */
   function renderBar() {
-    var html = '<button type="button" class="chip all" data-all="1" title="Every task  (⌥0)">All <span class="c"></span></button>';
-    var i = 0;
+    var html = '<button type="button" class="chip all" data-all="1" title="Every task">All <span class="c"></span></button>';
     usedSides().forEach(function (s) {
       html += '<span class="sep" aria-hidden="true"></span><span class="grp">' +
         '<button type="button" class="side" data-side="' + esc(s.id) + '" title="Only ' + esc(s.name) +
         ', across the full width">' + esc(s.name) + ' <span class="c"></span></button>';
       cats.forEach(function (c) {
         if (c.side !== s.id) { return; }
-        i++;
         html += '<button type="button" class="chip" data-cat="' + esc(c.id) + '" style="--cc:' + colorVar(c) +
-          '" title="' + esc((c.holds ? c.holds + '. ' : '') + 'Double-click to rename, right-click for more' +
-          (i < 10 ? '  (⌥' + i + ')' : '')) + '"><i class="dot"></i><span class="lbl">' + esc(c.name) +
+          '" title="' + esc((c.holds ? c.holds + '. ' : '') + 'Double-click to rename, right-click for more') + '"><i class="dot"></i><span class="lbl">' + esc(c.name) +
           '</span> <span class="c"></span></button>';
       });
       html += '</span>';
@@ -314,6 +313,7 @@
     countEl.textContent = describe(shown.length, k);
     if (before) { flip(before); }
     buildStops();
+    paintExpand();
     /* A pointer resting on a category button keeps showing that category,
        including on anything this render has just drawn. */
     if (peekTest) { peek(peekTest); }
@@ -493,25 +493,45 @@
     cursorKey = keyOf(stops[i]);
     paintCursor(true);
   }
-  /* → opens the task under the cursor, or steps into it when it is already
-     open; ← steps back out to the task, then closes it. */
-  function arrow(dir) {
+  /* The keyboard follows the highlight: a button clicked earlier lets go of
+     it, so Enter and Space act on what is highlighted. */
+  function letGo() {
+    var a = document.activeElement;
+    if (a && a !== q && a !== document.body && a.blur) { a.blur(); }
+  }
+  /* ← and → go to the same place in the column beside, as the eye moves
+     between Work and Private. From anywhere else they go to the top of one. */
+  function switchColumn(dir) {
+    if (!focusEl.hidden) { return; }
+    var cols = $$('.col', board);
+    if (!cols.length) { return; }
+    var el = elOf(cursorKey), row = el && holderOf(el), col = row && row.closest('.col');
+    var at = col ? cols.indexOf(col) : -1, index = 0, target;
+    if (at === -1) {
+      target = cols[dir > 0 ? cols.length - 1 : 0];
+    } else {
+      target = cols[at + dir];
+      index = $$('.row:not([hidden])', col).indexOf(row);
+    }
+    var list = target ? $$('.row:not([hidden])', target) : [];
+    if (!list.length) { return; }
+    cursorKey = { id: list[Math.min(Math.max(index, 0), list.length - 1)].dataset.id, href: null };
+    paintCursor(true);
+  }
+  /* Space opens or closes the highlighted task; on one of its steps, it
+     closes the task and goes back to its line. */
+  function space() {
     var el = elOf(cursorKey);
-    if (!el) {
-      if (stops.length) { cursorKey = keyOf(stops[0]); paintCursor(true); }
+    if (!el) { return; }
+    var holder = holderOf(el);
+    if (holder.classList.contains('card')) { return; }
+    if (!el.classList.contains('tl')) {
+      cursorKey = { id: holder.dataset.id, href: null };
+      toggleSteps(holder.dataset.id, false);
+      paintCursor(true);
       return;
     }
-    var holder = holderOf(el), id = holder.dataset.id, onTask = el.classList.contains('tl');
-    if (dir > 0) {
-      if (!onTask) { return; }
-      var first = holder.classList.contains('card') ? $('.pg', holder) : null;
-      if (!first && holder.classList.contains('open')) { first = $('.subs:not([hidden]) .sub', holder); }
-      if (first) { cursorKey = keyOf(first); paintCursor(true); return; }
-      toggleSteps(id, true);
-      return;
-    }
-    if (!onTask) { cursorKey = { id: id, href: null }; paintCursor(true); return; }
-    if (holder.classList.contains('open')) { toggleSteps(id, false); }
+    toggleSteps(holder.dataset.id);
   }
 
   /* -------------------------------------------------------------- the menu */
@@ -1084,17 +1104,27 @@
     cursorKey = null;
     render(false);
   });
-  $$('.seg [data-steps]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      stepsMode = b.dataset.steps;
+  /* One button that says what it will do: open every task, or close every
+     open one. The page remembers which way it was left. */
+  var expandBtn = $('#expand');
+  function anyOpen() {
+    return tasks.some(function (t) { var r = rows[t.id]; return r.isConnected && !r.hidden && r.classList.contains('open'); });
+  }
+  function paintExpand() {
+    if (!expandBtn) { return; }
+    var open = anyOpen();
+    expandBtn.textContent = open ? 'Collapse all' : 'Expand all';
+    expandBtn.title = open ? 'Close every task, so each is one line again' : 'Open every task, to see all its steps and pages';
+    expandBtn.setAttribute('aria-expanded', open);
+    expandBtn.hidden = !focusEl.hidden || !tasks.some(openable);
+  }
+  if (expandBtn) {
+    expandBtn.addEventListener('click', function () {
+      stepsMode = anyOpen() ? 'newest' : 'all';
       flipped = {};
       writeSteps();
-      paintSteps_();
       render(true);
     });
-  });
-  function paintSteps_() {
-    $$('.seg [data-steps]').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.steps === stepsMode); });
   }
 
   document.addEventListener('keydown', function (e) {
@@ -1102,14 +1132,6 @@
     if (!menu.hidden) { return; }
     var active = document.activeElement, typing = active === q;
     if (active && active.tagName === 'INPUT' && !typing) { return; }
-    if (e.altKey && /^Digit[0-9]$/.test(e.code)) {
-      e.preventDefault();
-      var d = +e.code.slice(5);
-      if (d === 0) { setSel({ kind: 'all' }); return; }
-      var c = orderedCats()[d - 1];
-      if (c) { setSel({ kind: 'cats', ids: [c.id] }); }
-      return;
-    }
     if (e.metaKey || e.ctrlKey || e.altKey) { return; }
     if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); q.select(); return; }
     if (e.key === 'Escape') {
@@ -1118,15 +1140,23 @@
       q.blur();
       return;
     }
-    if (e.key === 'ArrowDown') { e.preventDefault(); moveCursor(1); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); moveCursor(-1); return; }
-    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (!typing || !q.value)) {
+    var free = !typing || !q.value;
+    if (e.key === 'ArrowDown') { e.preventDefault(); letGo(); moveCursor(1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); letGo(); moveCursor(-1); return; }
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && free) {
       e.preventDefault();
-      arrow(e.key === 'ArrowRight' ? 1 : -1);
+      letGo();
+      switchColumn(e.key === 'ArrowRight' ? 1 : -1);
       return;
     }
+    if (e.key === ' ' && free && cursorKey && !(active && active !== q && /^(BUTTON|A|SUMMARY)$/.test(active.tagName))) {
+      e.preventDefault();
+      space();
+      return;
+    }
+    /* Enter opens what is highlighted, whatever button was clicked last; with
+       nothing highlighted, a focused button keeps its usual Enter. */
     if (e.key === 'Enter') {
-      if (active && (active.tagName === 'A' || active.tagName === 'BUTTON')) { return; }
       var el = elOf(cursorKey) || (stops.length === 1 ? stops[0] : null);
       if (el) { e.preventDefault(); location.href = el.getAttribute('href'); }
     }
@@ -1139,7 +1169,6 @@
     noticeEl.hidden = false;
   }
   renderBar();
-  paintSteps_();
   render(false);
   q.focus({ preventScroll: true });
 })();

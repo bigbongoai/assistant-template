@@ -39,13 +39,12 @@ border:1px solid var(--border-strong);border-radius:12px;box-shadow:var(--shadow
 color:var(--muted);font-size:13.5px}
 .howbody p{margin:0 0 8px}
 .howbody p:last-child{margin:0}
-.seg{margin-left:auto;display:flex;align-items:center;gap:6px}
-.seg .lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;
-color:var(--subtle);margin-right:2px}
-.seg button{font-size:12px;border:1px solid var(--border);background:var(--panel);color:var(--muted);
-padding:5px 10px;border-radius:7px;cursor:pointer}
-.seg button:hover{border-color:var(--copy);color:var(--copy)}
-.seg button[aria-pressed="true"]{background:var(--copy);color:var(--bg);border-color:var(--copy)}
+.expand{margin-left:auto;font-size:12.5px;border:1px solid var(--border);background:var(--panel);color:var(--muted);
+padding:6px 12px 6px 11px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.expand:before{content:"";width:6px;height:6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;
+transform:translateY(-2px) rotate(45deg);transition:transform .15s}
+.expand[aria-expanded="true"]:before{transform:translateY(2px) rotate(225deg)}
+.expand:hover{border-color:var(--copy);color:var(--copy)}
 
 /* Search, count and the category buttons stay put while the list scrolls. */
 .search{position:sticky;top:0;z-index:6;background:var(--bg);padding:12px 0;margin-top:6px}
@@ -285,7 +284,7 @@ font-size:12px;color:var(--subtle)}
 
 @media (max-width:760px){
 body{padding-inline:14px}
-.seg{margin-left:0}
+.expand{margin-left:0}
 .hint{display:none}
 .sep{display:none}
 .bar{gap:6px 8px}

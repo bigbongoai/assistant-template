@@ -68,7 +68,8 @@ Nothing else.
 The index at `/` shows every task in two columns, one per side (Work and Private unless the file says otherwise), newest task first.
 Newest means the highest number, so the order never changes when an old file is edited.
 Each task is one line: a coloured bar for its category, its number and name, its newest step, its category and the date it last changed.
-A task with more than one page has an arrow that lists its steps and their pages in place; "Steps: All" opens every task.
+A task with more than one page has an arrow that lists its steps and their pages in place; "Expand all" opens every task and "Collapse all" closes them.
+Keys: `/` search, `↑` `↓` move, `←` `→` go to the column beside, Space opens or closes the highlighted task, Enter opens it.
 Hover a category button to see its tasks, click it to see only them, and drag a task onto a button, or click its category name, to move it.
 A task with no category sits under "Not sorted" above the columns; tasks in `archive/` and `examples/` get a section of their own below.
 Each column shows 50 tasks before folding the rest.

@@ -101,6 +101,28 @@ async function pick(p, text) {
     check('only a task with more than one page has an arrow',
       (await p.$$('.row[data-id="tasks/01.alpha"] button.tw')).length === 1 && (await p.$$('.row[data-id="tasks/02.beta"] button.tw')).length === 0);
 
+    const on = () => p.$eval('.row.on', r => r.dataset.id).catch(() => null);
+    const isOpen = id => p.$eval(`.row[data-id="${id}"]`, r => r.classList.contains('open'));
+    await p.focus('#q');
+    await p.keyboard.press('ArrowRight');
+    check('→ goes to the right-hand column', await on() === 'tasks/02.beta', await on());
+    await p.keyboard.press('ArrowLeft');
+    check('← goes to the same place in the left-hand column', await on() === 'tasks/01.alpha', await on());
+    await p.keyboard.press('Space');
+    await settle(p);
+    check('Space opens the highlighted task in place', await isOpen('tasks/01.alpha'));
+    await p.keyboard.press('Space');
+    await settle(p);
+    check('Space again closes it', !(await isOpen('tasks/01.alpha')));
+    check('with nothing open the button offers to expand all', await p.$eval('#expand', b => b.textContent) === 'Expand all');
+    await p.click('#expand');
+    await settle(p);
+    check('Expand all opens every task with more than one page, and then offers to collapse',
+      await isOpen('tasks/01.alpha') && await p.$eval('#expand', b => b.textContent) === 'Collapse all');
+    await p.click('#expand');
+    await settle(p);
+    check('Collapse all closes them again', (await p.$$('.row.open')).length === 0);
+
     await p.click('.row[data-id="tasks/01.alpha"] button.tw');
     await settle(p);
     const opened = await p.$$eval('.row[data-id="tasks/01.alpha"] .subs .sub', a => a.map(x => x.textContent.trim()));
@@ -195,11 +217,12 @@ async function pick(p, text) {
     check('clicking a category shows only its tasks, full width', (await p.$$('.card')).length === 2 && p.url().endsWith('#cat=home'));
     await p.keyboard.press('Escape');
     await settle(p);
-    await p.focus('#q');
+    await p.click('.row[data-id="tasks/01.alpha"] button.tw');
     await p.keyboard.press('ArrowDown');
-    await p.keyboard.press('ArrowRight');
-    await settle(p);
-    check('→ opens the task under the cursor', (await p.$$('.row.open')).length >= 1);
+    const target = await p.$eval('.row.on .tl', a => a.getAttribute('href')).catch(() => null);
+    await Promise.all([p.waitForURL(u => u.pathname === target, { timeout: 4000 }), p.keyboard.press('Enter')]).catch(() => {});
+    check('Enter opens the highlighted task even after a button was clicked',
+      target && new URL(p.url()).pathname === target, { target, now: p.url() });
 
     const phone = await open(url, { viewport: { width: 390, height: 844 } });
     check('no sideways scrolling on a phone', await phone.evaluate(() =>

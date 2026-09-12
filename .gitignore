@@ -33,3 +33,21 @@ Thumbs.db
 *.askai.sqlite3
 *.askai.sqlite3-wal
 *.askai.sqlite3-shm
+
+# --- Brought over from the workspace ---
+# Secrets that are files rather than .env variables
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+# Anything a tool can rebuild
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+.next/
+# Local runtime state
+.claude/scheduled_tasks.lock
+# Throwaway working folders anywhere, not only under tasks/
+**/temp/

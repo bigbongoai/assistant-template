@@ -162,3 +162,10 @@ Two things worth knowing: credentials in that file end up in a teammate's `.env`
 
 - If a site blocks Claude with a 403, it's already instructed to use Playwright to fetch the page in a real browser.
 - Ask Claude to "test in Playwright" before trusting a deliverable — it screenshots the output and verifies from the image.
+
+## Maintaining this template
+
+- **Do not edit `_user.md`.** It was renamed from `_personal.md` on 12 September 2026.
+  Git only carries a person's own edits across that rename when the renamed file stays at least half the same, and it sits at exactly half now.
+  Any further change to the template's copy would make a colleague who has not pulled yet lose their edits in a conflict.
+  Put new guidance for everyone in `CLAUDE_ASSISTANT.md` instead.

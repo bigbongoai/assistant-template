@@ -1163,16 +1163,18 @@ def render_index() -> bytes:
     return body.encode("utf-8")
 
 
-def crumb_for(rel: str) -> dict[str, Any]:
+def crumb_for(rel: str, task: dict[str, Any] | None = None) -> dict[str, Any]:
     """Breadcrumb data for the injected top bar: All pages / task / step / page.
 
     Built from the same task and step records as the index and the task page,
     so the three can never disagree about a name, a number or where a link goes.
+    `task` is the page's task, when the caller has already built it.
     """
     parts = Path(rel).parts
     crumb: dict[str, Any] = {"home_label": "All pages", "task": None, "step": None,
                              "sub": "", "title": page_title(ROOT / rel)}
-    task = find_task("/".join(parts[:2])) if len(parts) >= 3 else None
+    if task is None and len(parts) >= 3:
+        task = find_task("/".join(parts[:2]))
     if task is None:
         return crumb
     number = task["number"]
@@ -1237,13 +1239,14 @@ FAVICON = ("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='
            "<text y='13' font-size='13'>&#9998;</text></svg>")
 
 
-def render_task(task: dict[str, Any]) -> bytes:
+def render_task(task: dict[str, Any], readonly: bool = False) -> bytes:
     """A task's own page: every step as a card, grouped into columns, with the
     arrows from `_task.json`.
 
     The cards are drawn here, so the page reads without JavaScript. task.js
     draws the arrows from where the cards actually land, keeps the page to one
-    screen, and handles renaming.
+    screen, and handles renaming. `readonly` leaves renaming out, for the copy
+    on briefings.page, which cannot change anything here.
     """
     now = datetime.now()
     plan = plan_task(task)
@@ -1276,12 +1279,14 @@ def render_task(task: dict[str, Any]) -> bytes:
             rel = f'<ul class="c-rel">{items}</ul>'
         # A renamed step still offers its page's own title on hover.
         tip = main["title"] if step["custom"] else main["detail"]
+        rename = "" if readonly else (
+            f'<button type="button" class="c-ren" aria-label="Rename {html_escape(tag, quote=True)}"'
+            f' title="Rename">{PENCIL}</button>')
         return (
             f'<article class="card" data-step="{html_escape(step["dir"], quote=True)}">'
             f'<div class="c-head"><span class="c-num">{html_escape(tag)}</span>'
             f'<span class="c-date">{html_escape(stamp(step["mtime"], now))}</span>'
-            f'<button type="button" class="c-ren" aria-label="Rename {html_escape(tag, quote=True)}"'
-            f' title="Rename">{PENCIL}</button></div>'
+            f'{rename}</div>'
             f'<a class="c-title" href="/page/{quote(main["rel"])}"'
             f' title="{html_escape(tip, quote=True)}">{html_escape(step["title"])}</a>'
             f'{desc}{pages}{rel}</article>'
@@ -1318,7 +1323,8 @@ def render_task(task: dict[str, Any]) -> bytes:
     else:
         how = (f"{where} gives this task no groups or arrows yet, so every step sits in one "
                "group, newest first.")
-    how += " The pencil on a card renames the step; its folder keeps its name."
+    if not readonly:
+        how += " The pencil on a card renames the step; its folder keeps its name."
     warn = ""
     if "_error" in meta:
         warn = (f'<p class="tk-warn">{where} could not be read ({html_escape(meta["_error"])}), '
@@ -1369,6 +1375,31 @@ padding:40px 20px;color:#1a1a18;background:#f7f7f5}}</style></head><body>
 <p>There is no task with pages at <code>{html_escape(rel)}</code>.
 <a href="/">All pages</a></p></body></html>"""
     return body.encode("utf-8")
+
+
+# ------------------------------------------------------------ the online copy
+
+
+def mirror_bundle() -> dict[str, Any]:
+    """What briefings.page needs to show this workspace as this proxy does.
+
+    `bin/publish sync` sends a private copy of the workspace to briefings.page,
+    where its owner can read it from anywhere. The index, each task's own page
+    and the top bar of every page are drawn here, by the same code that serves
+    them at home, and sent as data, so the copy looks exactly like this proxy
+    and briefings.page keeps no second idea of how a workspace is laid out.
+    Everything is drawn read-only: the copy cannot change anything here.
+    """
+    pages = discover_pages()
+    tasks = build_tasks(pages)
+    task_of = {(t["area"], t["task_dir"]): t for t in tasks}
+    return {
+        "index": index_data(),
+        "tasks": {t["rel"]: render_task(t, readonly=True).decode("utf-8")
+                  for t in tasks if len(t["pages"]) > 1},
+        "crumbs": {p["rel"]: crumb_for(p["rel"], task_of.get((p["area"], p["task_dir"])))
+                   for p in pages},
+    }
 
 
 # -------------------------------------------------------------------------- server

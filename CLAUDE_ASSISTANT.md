@@ -236,12 +236,22 @@ server, and once the file leaves this machine the local proxy is no longer in th
 - **The notes go with the page.** `bin/publish` sends the `.md` files from the step
   folder and the task folder, which is what the drawer is grounded in - the same
   two layers the local proxy reads, except that a file named `CLAUDE.md` is never
-  sent: a task's whole internal record stays on this machine. Anything in the
-  files that are sent is readable by anyone who opens the page.
+  used for a public page: a task's whole internal record never reaches a reader.
+  Anything in the files that are used is readable by anyone who opens the page.
 - **Published pages are public.** Anyone with the link can read the page and its
   notes. Never publish client material, credentials, or personal data. Ask first
   if there is any doubt.
 - If the workspace chose `publish: none` at setup, don't offer this.
+
+### The private copy of the workspace
+
+`./bin/publish mirror on` keeps a private copy of the whole workspace on briefings.page: every page, the notes beside them and the index, sent again after every commit.
+Only the owner can open it, at their own address there (`https://<handle>.briefings.page/`), after signing in with the emailed link.
+It looks and works like the local proxy, read-only, with Ask AI on every page.
+
+- **Turn it on only when they ask.** It sends the task folders to briefings.page, each task's `CLAUDE.md` included. They stay private there, but they leave this machine.
+- **Nothing in it is public until they switch a page on**, at `https://briefings.page/publish/workspace/`. Switching one on is publishing it: it takes one of the plan's public pages. `./bin/publish <file>` does the same for a page that is in the copy.
+- `./bin/publish mirror` says whether it is on and what the last copy did. `./bin/publish mirror off` stops it; what is already there stays until they delete it on that page.
 
 ## Large files and sharing (R2)
 

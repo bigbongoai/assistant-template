@@ -14,6 +14,16 @@ drawer there. The result is a link you can send to anyone.
     ./bin/publish rm <id>
     ./bin/publish whoami
 
+It can also keep a private copy of the whole workspace there - every page, the
+notes beside them, and the index that lists them - sent again after every
+commit. Only you can open it, at your own address on briefings.page, after
+signing in; a page in it is public only once you switch it on.
+
+    ./bin/publish mirror on       send it now and after every commit
+    ./bin/publish mirror off      stop sending it
+    ./bin/publish mirror          where it stands
+    ./bin/publish sync            send it now, once
+
 The first time, a browser window opens and asks for an email address. There is
 no password and nothing to copy: you approve it in the browser, and this script
 collects the credential over its own connection and writes it to .env. The
@@ -22,13 +32,16 @@ token is never printed, and never travels through the browser.
 Drop this file at bin/publish in the workspace it publishes from. Standard
 library only. No install step.
 """
+import hashlib
 import http.server
+import importlib.util
 import json
 import os
 import secrets
 import socket
 import socketserver
 import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -37,6 +50,11 @@ import urllib.request
 import webbrowser
 from html import unescape
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:          # Windows, which locks files another way
+    fcntl = None
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
@@ -56,10 +74,16 @@ MAX_NOTES = 40
 # reads it; only this upload leaves it out. Compared case-insensitively.
 NEVER_PUBLISHED = {"claude.md"}
 
-USER_AGENT = "briefings-publish/1.0"
+USER_AGENT = "briefings-publish/1.1"
+
+# The sync in progress, so that a failure anywhere is written to its log: run
+# from a git hook, nobody is watching the terminal.
+_run = None
 
 
 def die(msg, code=1):
+    if _run is not None:
+        _run.fail(msg)
     print(f"publish: {msg}", file=sys.stderr)
     raise SystemExit(code)
 
@@ -117,19 +141,27 @@ def host():
             or DEFAULT_HOST).rstrip("/")
 
 
+def saved_token():
+    return read_env().get(TOKEN_KEY) or os.environ.get(TOKEN_KEY, "")
+
+
 # ------------------------------------------------------------------- http
 
 
-def api(path, payload=None, token=None, method=None, timeout=60):
-    """One JSON call. Returns (status, parsed-body)."""
+def api(path, payload=None, token=None, method=None, timeout=60, raw=None):
+    """One call. Sends JSON, or `raw` bytes. Returns (status, parsed-body)."""
     url = f"{host()}{path}"
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
     # Name ourselves. Cloudflare's bot rules refuse the default
     # "Python-urllib/3.x" outright, so without this every call is a 403 that
     # looks like a server fault.
     headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
-    if data is not None:
-        headers["Content-Type"] = "application/json"
+    if raw is not None:
+        data = raw
+        headers["Content-Type"] = "application/octet-stream"
+    else:
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        if data is not None:
+            headers["Content-Type"] = "application/json"
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
@@ -146,6 +178,14 @@ def api(path, payload=None, token=None, method=None, timeout=60):
             return exc.code, {"error": "http_error", "detail": body[:300]}
     except (urllib.error.URLError, ssl.SSLError, TimeoutError) as exc:
         die(f"could not reach {host()} ({exc}). Are you online?")
+
+
+def refused(status, body, doing):
+    """One sentence for a call that did not work."""
+    if status == 401:
+        return ("this workspace's credential was refused. Remove BRIEFINGS_TOKEN "
+                "from .env and run it again to sign in.")
+    return f"{doing}: {body.get('detail') or body.get('error') or f'status {status}'}"
 
 
 # ------------------------------------------------------- signing in (once)
@@ -229,7 +269,7 @@ def sign_in():
 
 
 def token_or_sign_in():
-    existing = read_env().get(TOKEN_KEY) or os.environ.get(TOKEN_KEY, "")
+    existing = saved_token()
     if existing:
         return existing
     print("This workspace has not published anything yet, so let's set that up.\n")
@@ -328,6 +368,9 @@ def cmd_publish(arg):
     print(f"\nPublishing {label(path)} ...")
     status, body = api("/api/publish/pages", {
         "task": task, "step": step,
+        # Which file it is, so a page already in the workspace copy is the one
+        # made public, rather than a second copy of it.
+        "rel": label(path),
         "title": page_title(html) or path.stem,
         "html": html, "notes": notes,
     }, token=token, timeout=120)
@@ -354,8 +397,7 @@ def cmd_publish(arg):
               file=sys.stderr)
         raise SystemExit(2)
     if status == 401:
-        die("this workspace's credential was refused. Remove BRIEFINGS_TOKEN "
-            "from .env and run it again to sign in.")
+        die(refused(status, body, ""))
     die(body.get("detail") or body.get("error") or f"failed with status {status}")
 
 
@@ -388,6 +430,336 @@ def cmd_whoami():
         die(body.get("detail") or body.get("error") or "could not read the account")
     print(f"{body['email']}  ({body['plan']} plan)")
     print(f"{body['live_pages']} of {body['max_live_pages']} pages live")
+    copy = body.get("workspace")
+    if copy and copy.get("synced_at"):
+        print(f"Workspace copy: {copy['files']} files, last sent {copy['synced_at'][:16].replace('T', ' ')} UTC")
+
+
+# ------------------------------------------------------ the workspace copy
+#
+# `sync` sends the whole workspace, and only what changed: it lists every file
+# with the SHA-256 of its bytes, briefings.page answers with the ones it does
+# not have, those go up one per request, and a last call swaps the new version
+# in all at once. `mirror on` adds one line to two git hooks so that happens,
+# in the background, after every commit and every merge.
+
+COPY_DIRS = ("tasks", "archive", "examples")
+# The index's own page code, which draws the copy's index as it is drawn here.
+COPY_UI = ("askai.js", "askai.css", "index.js", "index.css", "task.js", "task.css")
+# Never sent. The server refuses the same (apps/publish/workspace.py); they are
+# left out here first so nothing is sent only to be turned away.
+SKIP_PARTS = {"temp", "node_modules", "__pycache__"}
+SKIP_SUFFIXES = (".py", ".pyc", ".env")
+# The server's ceiling for one file.
+MAX_FILE_BYTES = 25 * 1024 * 1024
+
+HOOKS = ("post-commit", "post-merge")
+HOOK_MARK = "# briefings.page workspace copy - bin/publish mirror"
+HOOK_LINE = ('"$(git rev-parse --show-toplevel)/bin/publish" sync --quiet '
+             f'>/dev/null 2>&1 &  {HOOK_MARK}')
+# Kept inside .git, so none of it is ever committed.
+STATE_FILE = "briefings-copy.json"
+LOG_FILE = "briefings-copy.log"
+LOCK_FILE = "briefings-copy.lock"
+AGAIN_FILE = "briefings-copy.again"
+
+
+class _Run:
+    """One sync: what it said, kept for `mirror` to show later."""
+
+    def __init__(self, quiet):
+        self.quiet = quiet
+        self.lines = []
+
+    def say(self, msg):
+        self.lines.append(msg)
+        if not self.quiet:
+            print(msg, flush=True)
+
+    def save(self):
+        try:
+            stamp = time.strftime("%Y-%m-%d %H:%M")
+            git_path(LOG_FILE).write_text(
+                "\n".join(f"{stamp}  {line}" for line in self.lines) + "\n", encoding="utf-8")
+        except (OSError, SystemExit):
+            pass
+
+    def fail(self, msg):
+        global _run
+        _run = None
+        self.say(f"Not sent: {msg}")
+        self.save()
+        raise SystemExit(1)
+
+
+def git(*args):
+    out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+    if out.returncode != 0:
+        die(f"git {args[0]} failed: {(out.stderr or out.stdout).strip()}")
+    return out.stdout
+
+
+def git_path(name):
+    """A file inside this repository's .git folder."""
+    return (ROOT / git("rev-parse", "--git-path", name).strip()).resolve()
+
+
+def _try_lock(handle):
+    if fcntl is not None:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+    import msvcrt
+    try:
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        return True
+    except OSError:
+        return False
+
+
+def load_bundle():
+    """The index, each task's page and every page's top bar, drawn read-only by
+    this workspace's own proxy code, so the copy looks exactly like home."""
+    source = ROOT / "_askai" / "server.py"
+    if not source.is_file():
+        die("this workspace has no _askai/server.py, so there is no index to copy.")
+    spec = importlib.util.spec_from_file_location("askai_server_for_copy", source)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:          # a broken proxy is not a reason to crash
+        die(f"could not load _askai/server.py ({exc}).")
+    if not hasattr(module, "mirror_bundle"):
+        die("this workspace's _askai/server.py is too old to draw the copy. Update the "
+            "workspace (git pull upstream main) and run this again.")
+    try:
+        return module.mirror_bundle()
+    except Exception as exc:
+        die(f"drawing the index failed ({exc}).")
+
+
+def copy_files(bundle):
+    """Every file the copy holds, and the ones left out for being too big.
+
+    What git tracks in the task folders, inside submodules too; every page the
+    index shows, even one not committed yet; and the index's own page code.
+    """
+    tracked = git("ls-files", "-z", "--recurse-submodules", "--", *COPY_DIRS).split("\0")
+    wanted = ({p for p in tracked if p} | set(bundle.get("crumbs") or {})
+              | {f"_askai/{name}" for name in COPY_UI})
+    root = ROOT.resolve()
+    keep, too_big = [], []
+    for rel in sorted(wanted):
+        parts = rel.split("/")
+        name = parts[-1].lower()
+        if (any(not p or p == ".." or p.startswith(".") for p in parts)
+                or SKIP_PARTS & set(parts) or name.endswith(SKIP_SUFFIXES)
+                or ".sqlite3" in name):
+            continue
+        path = ROOT / rel
+        # A link could point anywhere on this computer. Only real files inside
+        # the workspace are sent.
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+            continue
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            too_big.append((rel, size))
+            continue
+        keep.append(rel)
+    return keep, too_big
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def hash_files(paths, known):
+    """{path: [sha256, size]}, reading only files whose size or time changed."""
+    manifest, seen = {}, {}
+    for rel in paths:
+        stat = (ROOT / rel).stat()
+        hit = known.get(rel)
+        if isinstance(hit, list) and len(hit) == 3 and hit[:2] == [stat.st_mtime_ns, stat.st_size]:
+            digest = hit[2]
+        else:
+            digest = sha256_file(ROOT / rel)
+        seen[rel] = [stat.st_mtime_ns, stat.st_size, digest]
+        manifest[rel] = [digest, stat.st_size]
+    return manifest, seen
+
+
+def sync_once(run, token):
+    state_path = git_path(STATE_FILE)
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = {}
+
+    bundle = load_bundle()
+    paths, too_big = copy_files(bundle)
+    manifest, seen = hash_files(paths, state.get("hashes") or {})
+    mark = hashlib.sha256(json.dumps([manifest, bundle, host()], sort_keys=True)
+                          .encode("utf-8")).hexdigest()
+    if state.get("fingerprint") == mark:
+        run.say(f"Nothing has changed since the last copy: {state.get('url', '')}")
+        return
+
+    status, body = api("/api/publish/workspace/plan", {"files": manifest}, token=token)
+    if status != 200:
+        run.fail(refused(status, body, "briefings.page would not take the list of files"))
+    missing = body.get("missing") or []
+    first = {}
+    for rel, (digest, _) in manifest.items():
+        first.setdefault(digest, rel)
+    if missing:
+        size = sum(manifest[first[d]][1] for d in missing)
+        run.say(f"Sending {len(missing)} file{'' if len(missing) == 1 else 's'}, "
+                f"{size / 1_000_000:.1f} MB.")
+    for digest in missing:
+        data = (ROOT / first[digest]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            # Changed while this was running. Go round again with the new bytes.
+            git_path(AGAIN_FILE).touch()
+            run.say(f"{first[digest]} changed while it was being sent, so the copy starts again.")
+            return
+        status, body = api(f"/api/publish/workspace/blobs/{digest}", raw=data,
+                           token=token, method="PUT", timeout=300)
+        if status != 201:
+            run.fail(refused(status, body, f"{first[digest]} was not taken"))
+
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                          capture_output=True, text=True).stdout.strip()
+    status, body = api("/api/publish/workspace/commit", {
+        "files": manifest, "bundle": bundle, "head": head,
+        "source": socket.gethostname(),
+    }, token=token, timeout=300)
+    if status != 200:
+        run.fail(refused(status, body, "the new copy was not saved"))
+
+    state_path.write_text(json.dumps({
+        "fingerprint": mark, "hashes": seen, "url": body.get("url"),
+        "synced_at": time.time(),
+    }), encoding="utf-8")
+    run.say(f"Your copy is up to date: {body.get('url')}")
+    run.say(f"{body.get('files')} files, {body.get('pages')} pages. This time: "
+            f"{body.get('added', 0)} new, {body.get('changed', 0)} changed, "
+            f"{body.get('removed', 0)} removed.")
+    for rel, size in too_big:
+        run.say(f"Left out, over {MAX_FILE_BYTES // (1024 * 1024)} MB: {rel} "
+                f"({size / 1_000_000:.1f} MB)")
+
+
+def cmd_sync(quiet=False):
+    """Send the copy now. From a git hook it runs with --quiet and writes what
+    happened to .git/briefings-copy.log instead of the terminal."""
+    global _run
+    run = _Run(quiet)
+    token = saved_token()
+    if not token:
+        if quiet:
+            _run = run
+            die("this workspace is not signed in to briefings.page. Run ./bin/publish mirror on.")
+        token = token_or_sign_in()
+    _run = run
+
+    lock = open(git_path(LOCK_FILE), "a")
+    if not _try_lock(lock):
+        # One is already sending. It looks for this file when it finishes and
+        # goes round once more, so this change is not lost.
+        git_path(AGAIN_FILE).touch()
+        _run = None
+        if not quiet:
+            print("A copy is already being sent; it will include this change too.")
+        return
+    try:
+        for _ in range(5):
+            git_path(AGAIN_FILE).unlink(missing_ok=True)
+            sync_once(run, token)
+            if not git_path(AGAIN_FILE).exists():
+                break
+        run.save()
+    finally:
+        _run = None
+        lock.close()
+
+
+def _is_shell(first_line):
+    words = first_line[2:].split() if first_line.startswith("#!") else []
+    if words and words[0].endswith("/env"):
+        words = words[1:]
+    return bool(words) and os.path.basename(words[0]) in ("sh", "bash", "zsh", "dash")
+
+
+def hooks_on():
+    for name in HOOKS:
+        path = git_path(f"hooks/{name}")
+        text = path.read_text(encoding="utf-8") if path.exists() else "#!/bin/sh\n"
+        if HOOK_MARK in text:
+            continue
+        first = text.splitlines()[0] if text.strip() else ""
+        if first and not _is_shell(first):
+            die(f"{path} is not a shell script, so add this line to it yourself:\n  {HOOK_LINE}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text.rstrip("\n") + "\n" + HOOK_LINE + "\n", encoding="utf-8")
+        path.chmod(path.stat().st_mode | 0o111)
+
+
+def hooks_off():
+    for name in HOOKS:
+        path = git_path(f"hooks/{name}")
+        if path.exists():
+            kept = [line for line in path.read_text(encoding="utf-8").splitlines()
+                    if HOOK_MARK not in line]
+            path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def hooks_are_on():
+    for name in HOOKS:
+        path = git_path(f"hooks/{name}")
+        if not path.exists() or HOOK_MARK not in path.read_text(encoding="utf-8"):
+            return False
+    return True
+
+
+def cmd_mirror(rest):
+    what = rest[0] if rest else "status"
+    if what == "on":
+        token_or_sign_in()
+        hooks_on()
+        print("The copy is on. It is sent to briefings.page after every commit and every merge.\n")
+        cmd_sync(quiet=False)
+        print(f"\nOnly you can open it. Choose which pages are public at "
+              f"{host()}/publish/workspace/")
+    elif what == "off":
+        hooks_off()
+        print("The copy is off. Nothing more is sent after commits.")
+        print(f"What is already on briefings.page stays; delete it at {host()}/publish/workspace/")
+    elif what == "status":
+        print(f"Sent after every commit: {'yes' if hooks_are_on() else 'no'}")
+        token = saved_token()
+        if token:
+            status, body = api("/api/publish/workspace", token=token)
+            if status == 200 and body.get("synced_at"):
+                print(f"On briefings.page: {body['files']} files, "
+                      f"{body['bytes'] / 1_000_000:.0f} of {body['max_bytes'] / 1_000_000:.0f} MB, "
+                      f"last sent {body['synced_at'][:16].replace('T', ' ')} UTC")
+                print(f"Open it at: {body['url']}")
+            elif status == 200:
+                print("On briefings.page: nothing yet.")
+            else:
+                print(refused(status, body, "Could not ask briefings.page"))
+        log = git_path(LOG_FILE)
+        if log.exists():
+            print("\nLast run:")
+            print(log.read_text(encoding="utf-8").rstrip())
+    else:
+        die("mirror takes on, off or nothing at all.")
 
 
 USAGE = """publish - put a deliverable online with its Ask AI drawer working
@@ -397,9 +769,16 @@ USAGE = """publish - put a deliverable online with its Ask AI drawer working
   ./bin/publish rm <id>       take one down and free its slot
   ./bin/publish whoami        which account this workspace publishes to
 
+  ./bin/publish mirror on     keep a private copy of the whole workspace on
+                              briefings.page, sent again after every commit
+  ./bin/publish mirror off    stop sending it
+  ./bin/publish mirror        where the copy stands
+  ./bin/publish sync          send the copy now, once
+
 The first run opens a browser to set up an account. Nothing to copy or paste.
 Published pages are public to anyone with the link - never publish client
-material, credentials, or personal data.
+material, credentials, or personal data. The workspace copy is private: only
+you can open it, until you make one of its pages public.
 """
 
 
@@ -416,6 +795,10 @@ def main(argv):
         if not rest:
             die("which page? Run ./bin/publish list to see the ids.")
         cmd_rm(rest[0])
+    elif command == "sync":
+        cmd_sync(quiet="--quiet" in rest)
+    elif command == "mirror":
+        cmd_mirror(rest)
     else:
         cmd_publish(command)
     return 0

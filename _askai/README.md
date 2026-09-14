@@ -142,6 +142,22 @@ The top bar on every page reads `All pages / Task 19 · Pricing / 19-15 · One p
 The task links to its task page.
 The step shows its number as written in its folder name, and its name from `_task.json`, falling back to the folder name.
 
+## The copy on briefings.page
+
+`./bin/publish mirror on` keeps a private copy of this workspace on briefings.page, sent again after every commit and every merge.
+Only its owner can open it, at `https://<handle>.briefings.page/`, after signing in; a page in it is public only once its owner switches it on at `https://briefings.page/publish/workspace/`.
+
+- The copy looks exactly like this proxy because this proxy draws it.
+  `mirror_bundle()` in `server.py` returns the index data, each task's page and every page's top bar, and `bin/publish sync` sends them with the files, so briefings.page keeps no second idea of how a workspace is laid out.
+- It is drawn read-only.
+  `index.js` reads `ASKAI_INDEX.readonly` and leaves out dragging, the category menus and Manage categories; `render_task(readonly=True)` leaves out the rename pencils.
+  On briefings.page, `ASKAI_INDEX.public` lists the pages anyone can read, and the index marks each of them "public".
+- What is sent: every file git tracks under `tasks/`, `archive/` and `examples/`, inside submodules too; every page the index shows, even one not committed yet; and this folder's `index.js`, `index.css`, `task.js`, `task.css`, `askai.js` and `askai.css`.
+  Never a scratch folder, a dot-file, Python, an environment file, a thread database, a link, or a file over 25 MB.
+- Only what changed is sent: every file is named by the SHA-256 of its bytes, and briefings.page asks only for the ones it does not have.
+- The drawer here, `askai.js`, runs on the copy's pages unchanged: briefings.page answers the same `/api/threads` and `/api/ask` calls this proxy does, with threads of its own that readers of a public page never see.
+- `./bin/publish mirror` says whether it is on, what is there, and what the last run did, which is kept in `.git/briefings-copy.log`.
+
 ## Notes
 
 - Ask AI only exists when a page is **served**. Opening one straight from disk still renders it.

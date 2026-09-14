@@ -25,6 +25,12 @@
   var sides = DATA.sides, cats = DATA.categories, placed = {};
   /* An unreadable _categories.json is shown, and never written over. */
   var locked = !!DATA.error;
+  /* The copy of this workspace on briefings.page draws this same page from the
+     same data, read-only: tasks are sorted on the computer the copy came from.
+     There, DATA.public lists the pages anyone can read, by their link here. */
+  var readonly = !!DATA.readonly;
+  var publicAt = DATA.public || {};
+  if (readonly) { document.body.classList.add('readonly'); }
   var tasks = DATA.tasks.slice();
   var byId = {};
   tasks.forEach(function (t) {
@@ -137,14 +143,27 @@
     }
     return { open: isOpen(t), steps: t.steps };
   }
+  function pub(href) {
+    return publicAt[href] ? '<span class="pub" title="Public: anyone with the link can read it">public</span>' : '';
+  }
+  /* A task with a public page says so on its own line too, because a one-page
+     task has no list of steps to show it in. */
+  function anyPublic(t) {
+    return t.steps.some(function (s) {
+      return publicAt[s.href] || s.more.some(function (p) { return publicAt[p.href]; });
+    });
+  }
+  function taskPub(t) {
+    return anyPublic(t) ? '<span class="pub" title="Has a public page: anyone with its link can read it">public</span>' : '';
+  }
   function lines(steps, cls) {
     return steps.map(function (s) {
       var html = '<li><a class="' + cls + '" draggable="false" href="' + esc(s.href) + '"><span class="snum">' +
-        esc(s.num) + '</span><span class="stitle">' + esc(s.title) + '</span><span class="meta">' +
+        esc(s.num) + '</span><span class="stitle">' + esc(s.title) + '</span><span class="meta">' + pub(s.href) +
         (s.threads ? '<span class="thr">threads</span>' : '') + '</span></a></li>';
       s.more.forEach(function (p) {
         html += '<li><a class="' + cls + ' page" draggable="false" href="' + esc(p.href) + '"><span class="snum"></span>' +
-          '<span class="stitle">' + esc(p.title) + '</span><span class="meta">' +
+          '<span class="stitle">' + esc(p.title) + '</span><span class="meta">' + pub(p.href) +
           (p.threads ? '<span class="thr">threads</span>' : '') + '</span></a></li>';
       });
       return html;
@@ -200,18 +219,20 @@
     var a = document.createElement('article');
     a.className = 'row' + (movable ? '' : ' plain');
     a.dataset.id = t.id;
-    a.draggable = movable;
+    a.draggable = movable && !readonly;
     a.innerHTML =
       (many ? '<button type="button" class="tw" aria-expanded="false">' + CHEVRON + '</button>' :
         '<span class="tw" aria-hidden="true"></span>') +
       '<a class="tl" draggable="false" href="' + esc(t.href) + '">' +
-      (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) + '</span></a>' +
+      (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) + '</span>' +
+      taskPub(t) + '</a>' +
       '<a class="latest" draggable="false" tabindex="-1" href="' + esc(s.href) + '" title="Newest step: ' +
       esc((s.num ? s.num + ' ' : '') + s.title) + '"><span class="snum">' + esc(s.num) + '</span><span class="stitle">' +
       esc(s.title) + '</span></a>' +
       (many ? '<button type="button" class="more" title="Show its steps">' + count + '</button>' :
         '<span class="more" aria-hidden="true"></span>') +
-      (movable ? '<button type="button" class="cat" aria-haspopup="menu"><i class="dot"></i><span class="cn"></span></button>' : '') +
+      (!movable ? '' : readonly ? '<span class="cat"><i class="dot"></i><span class="cn"></span></span>' :
+        '<button type="button" class="cat" aria-haspopup="menu"><i class="dot"></i><span class="cn"></span></button>') +
       '<span class="date">' + esc(t.date) + '</span>' +
       '<ol class="subs" hidden></ol>';
     rows[t.id] = a;
@@ -224,7 +245,8 @@
     var btn = $('.cat', a);
     if (btn) {
       $('.cn', btn).textContent = c ? c.name + (guess ? ' ?' : '') : 'Not sorted';
-      btn.title = guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category';
+      btn.title = readonly ? (guess ? "Claude's guess" : '') :
+        (guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category');
     }
     paintSteps(t);
   }
@@ -239,14 +261,17 @@
       cats.forEach(function (c) {
         if (c.side !== s.id) { return; }
         html += '<button type="button" class="chip" data-cat="' + esc(c.id) + '" style="--cc:' + colorVar(c) +
-          '" title="' + esc((c.holds ? c.holds + '. ' : '') + 'Double-click to rename, right-click for more') + '"><i class="dot"></i><span class="lbl">' + esc(c.name) +
+          '" title="' + esc(readonly ? (c.holds || c.name) :
+            (c.holds ? c.holds + '. ' : '') + 'Double-click to rename, right-click for more') + '"><i class="dot"></i><span class="lbl">' + esc(c.name) +
           '</span> <span class="c"></span></button>';
       });
       html += '</span>';
     });
-    html += '<span class="sep" aria-hidden="true"></span>' +
-      '<button type="button" class="chip manage" title="Rename, recolour, move, describe, add or delete categories">' +
-      'Manage categories</button>';
+    if (!readonly) {
+      html += '<span class="sep" aria-hidden="true"></span>' +
+        '<button type="button" class="chip manage" title="Rename, recolour, move, describe, add or delete categories">' +
+        'Manage categories</button>';
+    }
     bar.innerHTML = html;
   }
   function counts() {
@@ -359,7 +384,8 @@
     looseEl.hidden = !loose.length;
     if (loose.length) {
       looseEl.appendChild(panel('loose', '<span class="colname">Not sorted</span><span class="c">' + loose.length +
-        '</span><span class="note">' + (cats.length ? 'Drag each onto a category, or click "Not sorted" on it'
+        '</span><span class="note">' + (readonly ? 'Sort them on your computer' :
+          cats.length ? 'Drag each onto a category, or click "Not sorted" on it'
           : 'Add a category with Manage categories, then drag tasks onto it') + '</span>', loose));
     }
     var used = usedSides();
@@ -414,16 +440,18 @@
       var c = catOf(t), guess = isGuess(t);
       var size = t.steps.length > 1 ? plural(t.steps.length, 'step') + ' · ' + plural(t.pages, 'page') :
         (t.pages > 1 ? plural(t.pages, 'page') : 'One page');
-      html += '<article class="card' + (guess ? ' guess' : '') + '" data-id="' + esc(t.id) + '" draggable="true" style="--cc:' +
-        colorVar(c) + '"><div class="cside"><a class="tl" draggable="false" href="' + esc(t.href) + '">' +
+      var chip = '<i class="dot"></i><span class="cn">' + esc(c.name + (guess ? ' ?' : '')) + '</span>';
+      chip = readonly ? '<span class="cat">' + chip + '</span>' :
+        '<button type="button" class="cat" aria-haspopup="menu" title="' +
+        (guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category') + '">' + chip + '</button>';
+      html += '<article class="card' + (guess ? ' guess' : '') + '" data-id="' + esc(t.id) + '" draggable="' + !readonly +
+        '" style="--cc:' + colorVar(c) + '"><div class="cside"><a class="tl" draggable="false" href="' + esc(t.href) + '">' +
         (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) +
-        '</span></a><div class="tmeta"><button type="button" class="cat" aria-haspopup="menu" title="' +
-        (guess ? "Claude's guess - click to keep it here or move it" : 'Move to another category') + '"><i class="dot"></i>' +
-        '<span class="cn">' + esc(c.name + (guess ? ' ?' : '')) + '</span></button><span>' + size + '</span><span>Changed ' +
+        '</span>' + taskPub(t) + '</a><div class="tmeta">' + chip + '<span>' + size + '</span><span>Changed ' +
         esc(t.date) + '</span></div></div><ol class="steps">' + lines(t.steps, 'pg') + '</ol></article>';
     });
     if (!shown.length && !query) {
-      html += '<p class="none">No tasks in ' + esc(selLabel()) + ' yet. Drag one onto its button.</p>';
+      html += '<p class="none">No tasks in ' + esc(selLabel()) + ' yet.' + (readonly ? '' : ' Drag one onto its button.') + '</p>';
     }
     focusEl.innerHTML = html;
     if (animate && !REDUCE) {
@@ -1037,17 +1065,17 @@
   });
   bar.addEventListener('dblclick', function (e) {
     var b = e.target.closest('.chip[data-cat]');
-    if (b) { e.preventDefault(); startRename(b.dataset.cat); }
+    if (b && !readonly) { e.preventDefault(); startRename(b.dataset.cat); }
   });
   bar.addEventListener('contextmenu', function (e) {
     var b = e.target.closest('.chip[data-cat]');
-    if (b) { e.preventDefault(); chipMenu(b); }
+    if (b && !readonly) { e.preventDefault(); chipMenu(b); }
   });
   document.addEventListener('click', function (e) {
     var tw = e.target.closest('.row button.tw, .row button.more');
     if (tw) { toggleSteps(holderOf(tw).dataset.id); return; }
     var cat = e.target.closest('.row .cat, .card .cat');
-    if (cat) { e.preventDefault(); moveMenu(holderOf(cat).dataset.id, cat); return; }
+    if (cat && !readonly) { e.preventDefault(); moveMenu(holderOf(cat).dataset.id, cat); return; }
     var sb = e.target.closest('.sidebtn');
     if (sb) {
       setSel(sel.kind === 'side' && sel.id === sb.dataset.side ? { kind: 'all' } : { kind: 'side', id: sb.dataset.side });
@@ -1069,7 +1097,7 @@
   function dropTarget(e) { return e.target.closest ? e.target.closest('.chip[data-cat]') : null; }
   document.addEventListener('dragstart', function (e) {
     var h = e.target.closest && e.target.closest('.row, .card');
-    if (!h || !sortable(byId[h.dataset.id])) { return; }
+    if (!h || readonly || !sortable(byId[h.dataset.id])) { return; }
     dragId = h.dataset.id;
     try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) { /* old browsers */ }
     closeMenu(false);

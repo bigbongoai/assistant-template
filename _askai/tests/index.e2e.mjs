@@ -29,7 +29,7 @@ const CATEGORIES = {
   tasks: { '01.alpha': { category: 'acme' }, '02.beta': { category: 'home', guess: true } },
 };
 
-function workspace(categories) {
+function workspace(categories, extra) {
   const root = mkdtempSync(join(tmpdir(), 'askai-index-'));
   mkdirSync(join(root, '_askai'));
   for (const f of readdirSync(ASKAI)) {
@@ -47,6 +47,12 @@ function workspace(categories) {
   put('examples/01.example/index.html', 'Example page');
   if (categories !== undefined) {
     writeFileSync(join(root, '_categories.json'), typeof categories === 'string' ? categories : JSON.stringify(categories, null, 2));
+  }
+  if (extra) {
+    extra((rel, text) => {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), text);
+    });
   }
   return root;
 }
@@ -252,6 +258,62 @@ async function pick(p, text) {
     await p.dragAndDrop('.row[data-id="tasks/02.beta"]', '.chip[data-cat="first"]');
     await settle(p);
     check('and a task can then be dragged into it', onDisk(root).tasks['02.beta']?.category === 'first');
+  } finally {
+    proc.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------ tasks with no page yet, and their status
+{
+  const root = workspace(CATEGORIES, write => {
+    write('tasks/04.delta/CLAUDE.md', '# Delta\n\n## Where this stands\n\nReading the **sources** now.\n' +
+      'Nothing is written yet.\n- first open point\n\n## Decisions\n\nnot for the page\n');
+    write('tasks/04.delta/_task.json', '{"status": "in progress"}');
+    write('tasks/05.epsilon/CLAUDE.md', '# Epsilon\n');
+    write('tasks/01.alpha/_task.json', '{"status": "done"}');
+  });
+  const { proc, url } = await serve(root);
+  try {
+    const p = await open(url);
+    const ids = await p.$$eval('.row', rs => rs.map(r => r.dataset.id));
+    check('a task with no page yet is on the index', ids.includes('tasks/04.delta') && ids.includes('tasks/05.epsilon'), ids);
+    check('its line says it has no page yet',
+      await p.$eval('.row[data-id="tasks/04.delta"] .latest', e => e.textContent) === 'No page yet');
+    check('its status from _task.json is on its line, in plain words', await p.$eval('.row[data-id="tasks/04.delta"] .status',
+      e => e.dataset.status === 'in-progress' && e.textContent === 'In progress'));
+    check('a task with pages shows its status too',
+      await p.$eval('.row[data-id="tasks/01.alpha"] .status', e => e.textContent) === 'Done');
+    check('a task with no status shows none', (await p.$$('.row[data-id="tasks/05.epsilon"] .status')).length === 0);
+    await p.fill('#q', 'in progress');
+    await settle(p);
+    check('searching for a status finds its tasks', JSON.stringify(await p.$$eval('.row:not([hidden])',
+      rs => rs.filter(r => r.isConnected).map(r => r.dataset.id))) === '["tasks/04.delta"]');
+    await p.fill('#q', '');
+    await settle(p);
+
+    const href = await p.$eval('.row[data-id="tasks/04.delta"] .tl', a => a.getAttribute('href'));
+    await p.goto(new URL(href, url).href);
+    const text = await p.$eval('body', b => b.innerText);
+    check('it opens a page with its status and where it stands', href === '/task/tasks/04.delta/' &&
+      text.includes('In progress') && text.includes('Reading the sources now. Nothing is written yet.') &&
+      text.includes('first open point') && !text.includes('not for the page'), text.slice(0, 300));
+    check('bold in its notes is drawn as bold', await p.$eval('.tk-stand strong', e => e.textContent) === 'sources');
+    check('that page has the top bar', (await p.$$('#askai-crumb')).length === 1);
+    writeFileSync(join(root, 'tasks/04.delta/_task.json'), '{"status": "waiting"}');
+    await p.reload();
+    check('it shows a new status as soon as the file says so', await p.$eval('.status', e => e.textContent) === 'Waiting on you');
+    const bare = await (await fetch(url + 'task/tasks/05.epsilon/')).text();
+    check('a task with no status or notes says so', bare.includes('No status yet') && bare.includes('no "Where this stands" section'));
+
+    mkdirSync(join(root, 'tasks/04.delta/04-01.first'), { recursive: true });
+    writeFileSync(join(root, 'tasks/04.delta/04-01.first/index.html'), '<!doctype html><title>Delta first</title><p>Delta</p>');
+    await p.goto(url);
+    await settle(p);
+    check('once it has a page, its line opens that page', await p.$eval('.row[data-id="tasks/04.delta"] .tl',
+      a => a.getAttribute('href')) === '/page/tasks/04.delta/04-01.first/index.html');
+    await p.goto(url + 'task/tasks/01.alpha/');
+    check('a task\'s own page shows its status', await p.$eval('.tk-h1 .status', e => e.textContent) === 'Done');
   } finally {
     proc.kill();
     rmSync(root, { recursive: true, force: true });

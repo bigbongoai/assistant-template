@@ -109,6 +109,7 @@ Everything a folder name cannot say lives in one small file in the task folder, 
 
 ```json
 {
+  "status": "in progress",
   "groups": [
     {"id": "sell", "title": "What we sell", "description": "The price list", "column": 1}
   ],
@@ -135,6 +136,11 @@ Everything a folder name cannot say lives in one small file in the task folder, 
 - An arrow runs from a step to a later step that built on it, corrected it or replaced it.
   Its label says which, in a few words.
 - A step the file does not place lands in a "Not in a group yet" column, so a missing entry shows.
+- `status` says how far along the task is: `not-started`, `in-progress`, `waiting` (the next move is the person's), `stopped` or `done`, as the key or in plain words ("in progress").
+  The index shows it as a pill beside the task's name, a search for it finds the task, and the task's page shows it beside the title.
+- A task folder with no page yet is on the index too, with "No page yet" where its newest step would be.
+  It opens a page the proxy draws from its `status` and the "Where this stands" section of its `CLAUDE.md`, drawn afresh on every visit and every minute; nothing is written into the folder.
+  Once the task has a page, it opens that instead.
 - The pencil on a card renames the step: the proxy rewrites only that step's `title`, atomically.
   Folder names never change, because deploy scripts, `_tasks.md`, links between pages and the thread database beside every page all depend on them.
 

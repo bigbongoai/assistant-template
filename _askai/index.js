@@ -114,7 +114,8 @@
   }
   function headHay(t) {
     var c = catOf(t);
-    return ((t.n !== null ? t.n : '') + ' ' + t.name + ' ' + t.dir + ' ' + (c ? c.name : 'not sorted')).toLowerCase();
+    return ((t.n !== null ? t.n : '') + ' ' + t.name + ' ' + t.dir + ' ' + (c ? c.name : 'not sorted') + ' ' +
+      (t.status_label || '')).toLowerCase();
   }
   function stepHay(s) {
     return (s.num + ' ' + s.title + ' ' + s.more.map(function (p) { return p.title; }).join(' ')).toLowerCase();
@@ -155,6 +156,10 @@
   }
   function taskPub(t) {
     return anyPublic(t) ? '<span class="pub" title="Has a public page: anyone with its link can read it">public</span>' : '';
+  }
+  /* How far along the task is, from its _task.json. */
+  function statusChip(t) {
+    return t.status ? '<span class="status" data-status="' + esc(t.status) + '">' + esc(t.status_label) + '</span>' : '';
   }
   function lines(steps, cls) {
     return steps.map(function (s) {
@@ -225,10 +230,12 @@
         '<span class="tw" aria-hidden="true"></span>') +
       '<a class="tl" draggable="false" href="' + esc(t.href) + '">' +
       (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) + '</span>' +
-      taskPub(t) + '</a>' +
-      '<a class="latest" draggable="false" tabindex="-1" href="' + esc(s.href) + '" title="Newest step: ' +
-      esc((s.num ? s.num + ' ' : '') + s.title) + '"><span class="snum">' + esc(s.num) + '</span><span class="stitle">' +
-      esc(s.title) + '</span></a>' +
+      statusChip(t) + taskPub(t) + '</a>' +
+      /* A task with no page yet has no newest step to show. */
+      (!s ? '<span class="latest none">No page yet</span>' :
+        '<a class="latest" draggable="false" tabindex="-1" href="' + esc(s.href) + '" title="Newest step: ' +
+        esc((s.num ? s.num + ' ' : '') + s.title) + '"><span class="snum">' + esc(s.num) + '</span><span class="stitle">' +
+        esc(s.title) + '</span></a>') +
       (many ? '<button type="button" class="more" title="Show its steps">' + count + '</button>' :
         '<span class="more" aria-hidden="true"></span>') +
       (!movable ? '' : readonly ? '<span class="cat"><i class="dot"></i><span class="cn"></span></span>' :
@@ -438,7 +445,8 @@
       '</span><button type="button" class="back">Both columns <kbd>esc</kbd></button></div>';
     shown.forEach(function (t) {
       var c = catOf(t), guess = isGuess(t);
-      var size = t.steps.length > 1 ? plural(t.steps.length, 'step') + ' · ' + plural(t.pages, 'page') :
+      var size = !t.pages ? 'No page yet' :
+        t.steps.length > 1 ? plural(t.steps.length, 'step') + ' · ' + plural(t.pages, 'page') :
         (t.pages > 1 ? plural(t.pages, 'page') : 'One page');
       var chip = '<i class="dot"></i><span class="cn">' + esc(c.name + (guess ? ' ?' : '')) + '</span>';
       chip = readonly ? '<span class="cat">' + chip + '</span>' :
@@ -447,7 +455,7 @@
       html += '<article class="card' + (guess ? ' guess' : '') + '" data-id="' + esc(t.id) + '" draggable="' + !readonly +
         '" style="--cc:' + colorVar(c) + '"><div class="cside"><a class="tl" draggable="false" href="' + esc(t.href) + '">' +
         (t.n !== null ? '<span class="num">' + t.n + '</span>' : '') + '<span class="tname">' + esc(t.name) +
-        '</span>' + taskPub(t) + '</a><div class="tmeta">' + chip + '<span>' + size + '</span><span>Changed ' +
+        '</span>' + statusChip(t) + taskPub(t) + '</a><div class="tmeta">' + chip + '<span>' + size + '</span><span>Changed ' +
         esc(t.date) + '</span></div></div><ol class="steps">' + lines(t.steps, 'pg') + '</ol></article>';
     });
     if (!shown.length && !query) {

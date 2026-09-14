@@ -143,6 +143,7 @@ When it says `non-technical`:
 - A new task → a new numbered task folder. A new round of work on an existing task → a new numbered step folder inside it, not a new task.
 - Do not create new tasks on your own initiative - only when the user asks for one.
 - **Whenever a new step is added to a task, add it to that task's `_task.json` in the same turn**: a display title, a few-word description, its group, and arrows to the steps it builds on, corrects or replaces, each with a short plain label. The Ask AI proxy draws the task's own page from that file (`/task/tasks/NN.task/`); a step missing from it lands in a "Not in a group yet" column. Rename a step by changing its `title` there, never its folder. Format: `_askai/README.md`.
+- **Every task's `_task.json` has a `status`**, which the index shows beside the task's name: `not-started`, `in-progress`, `waiting` (the next move is the person's), `stopped` or `done`. Change it in the same turn the task's position changes, like its `CLAUDE.md`. A task with no page yet opens a page showing its status and the "Where this stands" section of its `CLAUDE.md`.
 
 ### The task file: `tasks/NN.name/CLAUDE.md`
 - Every task has a `CLAUDE.md` at the root of its folder holding everything about it: what it is, what was decided and why, the numbers, what was delivered and where, what is open.
@@ -151,7 +152,8 @@ When it says `non-technical`:
 - Update it in the same turn whenever the task's position changes: a step delivered, a decision made, a number corrected, something deployed or taken down.
 - When something is corrected or replaced, keep it and label it where it stands, for example `**Replaced (2026-03-14, by the second quote below):**`, rather than deleting it or leaving it looking current. Claude treats a loaded file as instructions, so a stale conclusion that still looks current gets followed.
 - `_tasks.md` holds one paragraph per task, about 50-90 words: what it is, where it stands, what is open. It loads into every conversation, so the detail belongs in the task's `CLAUDE.md`, never there. Change the paragraph whenever the position changes.
-- Creating a task means creating these in the same turn: its folder, its `CLAUDE.md`, its paragraph in `_tasks.md`, and, where `_categories.json` exists, its category there.
+- Creating a task means creating these in the same turn: its folder, its `CLAUDE.md`, its paragraph in `_tasks.md`, its `_task.json` with a `status` (`in-progress` if the work starts now, otherwise `not-started`), and, where `_categories.json` exists, its category there.
+- Do that before the work itself starts. The local index shows the task from that moment; where Claude commits for this person, commit those files straight away too, so every copy of the workspace (another computer, the server, briefings.page) shows the task in progress while the work runs rather than only once it is finished.
 - If a task folder is a git repository of its own (a submodule), never write inside it. Its details stay in its paragraph.
 - Step folders keep their own notes as before; only the task-level record lives in the task's `CLAUDE.md`.
 
@@ -165,7 +167,7 @@ When it says `non-technical`:
 @_tasks.md
 2. When discussing a specific task, read the entire task folder to get context. Its `CLAUDE.md` arrives with the first file you open there; start from its **Where this stands**.
 3. Record work, findings, and outputs in the appropriate step folder, then bring the task's `CLAUDE.md` and its paragraph in `_tasks.md` up to date.
-4. When a new task is created, create its folder, its `CLAUDE.md` and its paragraph in `_tasks.md` together, and file it in `_categories.json`.
+4. When a new task is created, create its folder, its `CLAUDE.md` and its paragraph in `_tasks.md` together, give it a `status` in `_task.json`, and file it in `_categories.json`.
 
 ### Categories
 Only where `_categories.json` exists. If it is missing, say categories are not set up and do nothing unless asked.

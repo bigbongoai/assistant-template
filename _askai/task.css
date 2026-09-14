@@ -36,6 +36,36 @@ body.tk{margin:0; background:var(--bg); color:var(--copy); font-family:var(--san
 .tk-count{font-family:var(--mono); font-size:11px; color:var(--subtle)}
 .tk-sub{margin:5px 0 0; max-width:130ch; font-size:12.5px; color:var(--muted)}
 .tk-sub code{font-family:var(--mono); font-size:.92em}
+/* How far along the task is, from its _task.json; the same pill as the index. */
+.status{--st:var(--muted); font-family:var(--sans); font-size:11px; font-weight:600; line-height:1;
+  padding:4px 8px; border-radius:999px; white-space:nowrap; align-self:center; color:var(--st);
+  border:1px solid transparent; background:color-mix(in srgb,var(--st) 13%,transparent)}
+.status[data-status="not-started"],.status[data-status="none"]{--st:var(--subtle); background:none;
+  border-color:var(--border-strong)}
+.status[data-status="none"]{border-style:dashed; font-weight:500}
+.status[data-status="in-progress"]{--st:#2f6fd0}
+.status[data-status="waiting"]{--st:#a86f00}
+.status[data-status="stopped"]{--st:#5d6878}
+.status[data-status="done"]{--st:#3b8530}
+@media (prefers-color-scheme:dark){
+  .status[data-status="in-progress"]{--st:#72a6f7}
+  .status[data-status="waiting"]{--st:#e2b04d}
+  .status[data-status="stopped"]{--st:#a3adbb}
+  .status[data-status="done"]{--st:#7ec86c}
+}
+
+/* ---------- a task with no page yet ---------- */
+.tk-stand{max-width:72ch; margin-top:22px; padding:16px 20px 18px; background:var(--surface);
+  border:1px solid var(--border); border-radius:12px; font-size:14.5px; line-height:1.6}
+.tk-stand h2{margin:0 0 10px; font-family:var(--mono); font-size:10.5px; font-weight:600;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--subtle)}
+.tk-stand p{margin:0 0 10px}
+.tk-stand ul{margin:0 0 10px; padding-left:1.2em}
+.tk-stand li{margin:0 0 4px}
+.tk-stand > :last-child{margin-bottom:0}
+.tk-stand code{font-family:var(--mono); font-size:.9em}
+.tk-none{color:var(--subtle)}
+
 .tk-warn{margin:0 0 12px; padding:8px 12px; border:1px solid var(--err); border-radius:8px;
   color:var(--err); font-size:12.5px}
 

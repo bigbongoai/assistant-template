@@ -415,6 +415,25 @@ ROOT_STEP = "."
 TASK_FILE = "_task.json"
 TITLE_MAX = 80
 
+# How far along a task is: "status" in its `_task.json`, set by Claude as the
+# work moves, and shown on the index, on the task's page, and on the page a task
+# with no page yet opens. The file may say it in plain words ("in progress") or
+# as the key; anything else is shown as written.
+TASK_STATUSES = {
+    "not-started": "Not started",
+    "in-progress": "In progress",
+    "waiting": "Waiting on you",
+    "stopped": "Stopped",
+    "done": "Done",
+}
+STATUS_WORDS = {"new": "not-started", "to-do": "not-started", "todo": "not-started",
+                "started": "in-progress", "working": "in-progress",
+                "waiting-on-you": "waiting", "blocked": "waiting", "paused": "stopped",
+                "finished": "done", "complete": "done", "completed": "done"}
+STATUS_MAX = 30
+# The page a task with no page yet opens looks again this often, in seconds.
+PLACEHOLDER_REFRESH = 60
+
 # path -> (mtime_ns, size, parsed). Re-read only when the file changes.
 _meta_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
 
@@ -631,10 +650,13 @@ def finish_task(task: dict[str, Any]) -> dict[str, Any]:
     steps.sort(key=lambda s: (-s["key"], s["dir"]))
 
     single = len(task["pages"]) == 1
+    status, status_label = task_status(meta)
     task.update({
         "rel": rel,
         "folder": folder,
         "meta": meta,
+        "status": status,
+        "status_label": status_label,
         "steps": steps,
         "mtime": max(p["mtime"] for p in task["pages"]),
         # A task with one page has nothing to map, so it opens the page itself.
@@ -655,6 +677,58 @@ def build_tasks(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                           "number": page["number"], "name": page["task"], "pages": []})
         tasks[-1]["pages"].append(page)
     return [finish_task(task) for task in tasks]
+
+
+def task_status(meta: dict[str, Any]) -> tuple[str, str]:
+    """(key, words) from the "status" in `_task.json`, or ("", "") without one."""
+    raw = clean_text(meta.get("status"), STATUS_MAX) if isinstance(meta, dict) else ""
+    if not raw:
+        return "", ""
+    key = re.sub(r"[\s_]+", "-", raw.lower())
+    key = STATUS_WORDS.get(key, key)
+    if key in TASK_STATUSES:
+        return key, TASK_STATUSES[key]
+    return "other", raw
+
+
+def empty_task(area: str, task_dir: str) -> dict[str, Any]:
+    """A task folder with no page in it yet. It is on the index from the moment
+    it exists, and opens a page drawn from its status and its CLAUDE.md."""
+    match = TASK_FOLDER_RE.match(task_dir)
+    folder = ROOT / area / task_dir
+    meta = load_task_meta(folder)
+    status, status_label = task_status(meta)
+    try:
+        mtime = max([folder.stat().st_mtime] +
+                    [p.stat().st_mtime for p in folder.iterdir() if p.is_file()])
+    except OSError:
+        mtime = 0.0
+    rel = f"{area}/{task_dir}"
+    return {"area": area, "task_dir": task_dir, "rel": rel, "folder": folder, "meta": meta,
+            "number": int(match.group(1)) if match else None,
+            "name": humanize(match.group(2)) if match else humanize(task_dir),
+            "status": status, "status_label": status_label,
+            "pages": [], "steps": [], "mtime": mtime,
+            "href": "/task/" + quote(rel) + "/"}
+
+
+def all_tasks() -> list[dict[str, Any]]:
+    """Every task folder, with pages or not yet, in the index's order: area,
+    then newest number first."""
+    tasks = build_tasks(discover_pages())
+    seen = {(t["area"], t["task_dir"]) for t in tasks}
+    for area in CONTENT_DIRS:
+        base = ROOT / area
+        if not base.is_dir():
+            continue
+        for folder in sorted(base.iterdir()):
+            name = folder.name
+            if (folder.is_dir() and not name.startswith(".") and name not in SKIP_DIRS
+                    and (area, name) not in seen):
+                tasks.append(empty_task(area, name))
+    tasks.sort(key=lambda t: (CONTENT_DIRS.index(t["area"]),
+                              -(t["number"] if t["number"] is not None else -1), t["task_dir"]))
+    return tasks
 
 
 def resolve_task(rel: str) -> Path | None:
@@ -682,7 +756,7 @@ def find_task(rel: str) -> dict[str, Any] | None:
     if folder is None:
         return None
     pages = sorted((page_record(p) for p in html_files(folder)), key=page_sort_key)
-    return build_tasks(pages)[0] if pages else None
+    return build_tasks(pages)[0] if pages else empty_task(folder.parent.name, folder.name)
 
 
 def plan_task(task: dict[str, Any]) -> dict[str, Any]:
@@ -1080,7 +1154,7 @@ def index_data() -> dict[str, Any]:
     now = datetime.now()
     cats = load_categories()
     tasks = []
-    for task in build_tasks(discover_pages()):
+    for task in all_tasks():
         filed = cats["tasks"].get(task["task_dir"]) if task["area"] == CONTENT_DIRS[0] else None
         steps = [{
             "num": step["num"],
@@ -1103,6 +1177,8 @@ def index_data() -> dict[str, Any]:
             "steps": steps,
             "category": filed["category"] if filed else None,
             "guess": bool(filed and filed["guess"]),
+            "status": task["status"],
+            "status_label": task["status_label"],
         })
     return {
         "sides": cats["sides"],
@@ -1349,7 +1425,7 @@ def render_task(task: dict[str, Any], readonly: bool = False) -> bytes:
 <link rel="stylesheet" href="/_askai/task.css">
 </head><body class="tk"><div class="tk-wrap">
 <header class="tk-head">
-<div class="tk-h1">{tag}<h1>{html_escape(task["name"])}</h1><span class="tk-count">{counts}</span></div>
+<div class="tk-h1">{tag}<h1>{html_escape(task["name"])}</h1><span class="tk-count">{counts}</span>{status_chip(task)}</div>
 <p class="tk-sub">{how}</p>
 </header>
 {warn}
@@ -1377,6 +1453,110 @@ padding:40px 20px;color:#1a1a18;background:#f7f7f5}}</style></head><body>
     return body.encode("utf-8")
 
 
+# ------------------------------------------------- a task with no page yet
+
+
+def status_chip(task: dict[str, Any]) -> str:
+    if not task.get("status"):
+        return ""
+    return (f'<span class="status" data-status="{html_escape(task["status"], quote=True)}">'
+            f'{html_escape(task["status_label"])}</span>')
+
+
+def where_it_stands(folder: Path) -> str:
+    """The "Where this stands" section of a task's CLAUDE.md, as written."""
+    try:
+        text = (folder / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    match = re.search(r"^#{2,3}\s+Where this stands\s*$(.*?)(?=^#{1,3}\s|\Z)",
+                      text, re.MULTILINE | re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def note_html(text: str) -> str:
+    """A few lines of Markdown as HTML: paragraphs, bullets, bold and code.
+
+    Escaped first, so nothing in the file can add markup of its own. Lines next
+    to each other are one paragraph, which is how these files are written: one
+    sentence per line.
+    """
+    def inline(s: str) -> str:
+        s = html_escape(s)
+        s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        return re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+
+    blocks: list[str] = []
+    para: list[str] = []
+    items: list[str] = []
+
+    def end_para() -> None:
+        if para:
+            blocks.append(f"<p>{inline(' '.join(para))}</p>")
+            para.clear()
+
+    def end_list() -> None:
+        if items:
+            blocks.append("<ul>" + "".join(f"<li>{inline(i)}</li>" for i in items) + "</ul>")
+            items.clear()
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            end_para()
+            end_list()
+        elif s[:2] in ("- ", "* "):
+            end_para()
+            items.append(s[2:])
+        elif items and line[:1].isspace():
+            items[-1] += " " + s
+        else:
+            end_list()
+            para.append(s)
+    end_para()
+    end_list()
+    return "".join(blocks)
+
+
+def render_placeholder(task: dict[str, Any]) -> bytes:
+    """What a task with no page yet opens: its name, its status from
+    `_task.json`, and where it stands from its CLAUDE.md.
+
+    Drawn on every visit and again every minute, so it is never out of date,
+    and nothing is written into the task folder. Once the task has a page, the
+    index opens that instead.
+    """
+    number = task["number"]
+    title = f"Task {number} · {task['name']}" if number is not None else task["name"]
+    tag = f'<span class="tk-num">Task {number}</span>' if number is not None else ""
+    chip = status_chip(task) or '<span class="status" data-status="none">No status yet</span>'
+    stands = where_it_stands(task["folder"])
+    notes = note_html(stands) if stands else (
+        '<p class="tk-none">Its <code>CLAUDE.md</code> has no "Where this stands" section yet.</p>')
+    crumb = {"home_label": "All pages", "step": None, "sub": "", "title": None,
+             "task": {"num": f"Task {number}" if number is not None else "",
+                      "name": task["name"], "href": None}}
+    where = f"<code>{html_escape(task['rel'])}/{TASK_FILE}</code>"
+    body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="{PLACEHOLDER_REFRESH}">
+<title>{html_escape(title)}</title>
+<link rel="icon" href="{FAVICON}">
+<link rel="stylesheet" href="/_askai/askai.css">
+<link rel="stylesheet" href="/_askai/task.css">
+</head><body class="tk"><div class="tk-wrap">
+<header class="tk-head">
+<div class="tk-h1">{tag}<h1>{html_escape(task["name"])}</h1>{chip}</div>
+<p class="tk-sub">No page yet. This shows where the task stands, from {where} and its <code>CLAUDE.md</code>, and looks again every minute. Once the task has a page, it opens that instead.</p>
+</header>
+<main class="tk-stand"><h2>Where this stands</h2>{notes}</main>
+</div>
+<script>window.ASKAI_BAR_ONLY = true; window.ASKAI_CRUMB = {script_json(crumb)};</script>
+<script src="/_askai/askai.js" defer></script>
+</body></html>"""
+    return body.encode("utf-8")
+
+
 # ------------------------------------------------------------ the online copy
 
 
@@ -1391,12 +1571,15 @@ def mirror_bundle() -> dict[str, Any]:
     Everything is drawn read-only: the copy cannot change anything here.
     """
     pages = discover_pages()
-    tasks = build_tasks(pages)
+    tasks = all_tasks()
     task_of = {(t["area"], t["task_dir"]): t for t in tasks}
     return {
         "index": index_data(),
-        "tasks": {t["rel"]: render_task(t, readonly=True).decode("utf-8")
-                  for t in tasks if len(t["pages"]) > 1},
+        # A task with one page opens that page; every other task has a page of
+        # its own, and one with no page yet has the page drawn from its status.
+        "tasks": {t["rel"]: (render_task(t, readonly=True) if t["pages"]
+                             else render_placeholder(t)).decode("utf-8")
+                  for t in tasks if len(t["pages"]) != 1},
         "crumbs": {p["rel"]: crumb_for(p["rel"], task_of.get((p["area"], p["task_dir"])))
                    for p in pages},
     }
@@ -1543,7 +1726,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return
-        self._send(render_task(task), "text/html; charset=utf-8")
+        # A task with no page yet opens a page drawn from its status and notes.
+        page = render_task(task) if task["pages"] else render_placeholder(task)
+        self._send(page, "text/html; charset=utf-8")
 
     def _from_our_page(self) -> bool:
         # The endpoints that write to disk answer only pages this proxy served:

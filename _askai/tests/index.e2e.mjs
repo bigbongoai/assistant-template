@@ -7,7 +7,7 @@
 // folder with a few made-up tasks, starts the proxy there on a free port, and
 // checks the page and what it writes to _categories.json.
 import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
@@ -318,6 +318,35 @@ async function pick(p, text) {
       a => a.getAttribute('href')) === '/page/tasks/04.delta/04-01.first/index.html');
     await p.goto(url + 'task/tasks/01.alpha/');
     check('a task\'s own page shows its status', await p.$eval('.tk-h1 .task-status', e => e.textContent) === 'Done');
+  } finally {
+    proc.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------------ a change is committed by the proxy itself
+// Only where the post-commit hook runs bin/sync; here the hook stands in for it.
+{
+  const root = workspace(CATEGORIES);
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.invalid');
+  git('config', 'commit.gpgsign', 'false');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'start');
+  writeFileSync(join(root, '.git/hooks/post-commit'), '#!/bin/sh\n# Stands in for bin/sync.\n', { mode: 0o755 });
+  writeFileSync(join(root, 'tasks/02.beta/index.html'), '<!doctype html><title>Beta page</title><p>An unsaved edit</p>');
+  const { proc, url } = await serve(root);
+  try {
+    const p = await open(url);
+    const start = git('rev-parse', 'HEAD');
+    await p.dragAndDrop('.row[data-id="tasks/01.alpha"]', '.chip[data-cat="home"]');
+    for (let i = 0; i < 50 && git('rev-parse', 'HEAD') === start; i++) { await p.waitForTimeout(100); }
+    const subject = git('log', '-1', '--format=%s').trim();
+    check('a drag is committed by the proxy, saying what moved', subject === 'Categories: moved 01.alpha from Acme to Home', subject);
+    check('that commit holds _categories.json and nothing else', git('show', '--name-only', '--format=', 'HEAD').trim() === '_categories.json');
+    check('an unsaved edit elsewhere is left out of it', git('status', '--porcelain').trim() === 'M tasks/02.beta/index.html', git('status', '--porcelain'));
   } finally {
     proc.kill();
     rmSync(root, { recursive: true, force: true });

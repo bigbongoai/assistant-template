@@ -44,7 +44,7 @@ from html import escape as html_escape
 from html import unescape as html_unescape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 HERE = Path(__file__).resolve().parent
@@ -1148,7 +1148,9 @@ def change_categories(action: Any, data: dict[str, Any]) -> tuple[int, dict[str,
 
 
 def category_commit_message(action: Any, data: dict[str, Any], doc: dict[str, Any]) -> str:
-    """One line saying what a change to the categories did, for its commit."""
+    """One line saying what one change to the categories did, worded from the
+    request itself. bin/publish words the changes it makes from briefings.page
+    with it; the index page's own commits are worded by category_changes."""
     names = {c["id"]: c["name"] for c in doc.get("categories") or []}
     if action == "move":
         target = data.get("category")
@@ -1164,11 +1166,83 @@ def category_commit_message(action: Any, data: dict[str, Any], doc: dict[str, An
     return "Categories changed"
 
 
+def category_changes(old: Any, new: Any) -> list[str]:
+    """What changed between two versions of _categories.json, one plain line
+    per change, categories first and then tasks in folder order. Worked out
+    from the two files rather than from a request, so a commit that holds two
+    quick changes names both."""
+    before, after = normalize_categories(old), normalize_categories(new)
+    was = {c["id"]: c for c in before["categories"]}
+    now = {c["id"]: c for c in after["categories"]}
+    side = {s["id"]: s["name"] for s in before["sides"] + after["sides"]}
+    lines: list[str] = []
+    for cid, cat in now.items():
+        old_cat = was.get(cid)
+        if old_cat is None:
+            lines.append(f"new category {cat['name']}, under {side[cat['side']]}")
+            continue
+        if old_cat["name"] != cat["name"]:
+            lines.append(f"renamed category {old_cat['name']} to {cat['name']}")
+        if old_cat["side"] != cat["side"]:
+            lines.append(f"moved category {cat['name']} from {side[old_cat['side']]} to {side[cat['side']]}")
+        if old_cat["color"] != cat["color"]:
+            lines.append(f"recoloured category {cat['name']} from {old_cat['color']} to {cat['color']}")
+        if old_cat["holds"] != cat["holds"]:
+            lines.append(f"changed what goes in category {cat['name']}")
+    lines += [f"deleted category {cat['name']}" for cid, cat in was.items() if cid not in now]
+    if [cid for cid in was if cid in now] != [cid for cid in now if cid in was]:
+        lines.append("changed the order of the categories")
+    if before["sides"] != after["sides"]:
+        lines.append("changed the columns")
+    for folder in sorted(before["tasks"].keys() | after["tasks"].keys()):
+        a, b = before["tasks"].get(folder), after["tasks"].get(folder)
+        if a == b:
+            continue
+        if b is None:
+            lines.append(f"moved {folder} from {was[a['category']]['name']} back to not sorted")
+            continue
+        into = now[b["category"]]["name"]
+        guess = ", as a guess" if b["guess"] else ""
+        if a is None:
+            lines.append(f"filed {folder} under {into}{guess}")
+        elif a["category"] != b["category"]:
+            lines.append(f"moved {folder} from {was[a['category']]['name']} to {into}{guess}")
+        elif b["guess"]:
+            lines.append(f"marked {folder} in {into} as a guess")
+        else:
+            lines.append(f"kept {folder} in {into}, no longer a guess")
+    return lines
+
+
+def category_changes_message(old: Any, new: Any) -> str:
+    """The commit message for what the index page wrote: one change is the
+    subject line; several are counted there and listed below, one a line."""
+    lines = category_changes(old, new)
+    if len(lines) == 1:
+        return f"Categories: {lines[0]}\n\nMade on the index page."
+    if lines:
+        return (f"Categories: {len(lines)} changes made on the index page\n\n"
+                + "\n".join(f"- {line}" for line in lines))
+    return "Categories: written again on the index page, with no category or task changed"
+
+
 # ------------------------------------------------------- committing a change
 
 # Serialises this proxy's own commits, so two quick changes cannot trip over
 # each other's hold on git's index.
 _commit_lock = threading.Lock()
+
+# How long a commit keeps trying while git is busy, for example while another
+# commit or bin/sync holds the index. After that the file is left as it is and
+# the reason goes to the log; bin/sync's own notice after 5 minutes stuck is
+# what tells the person.
+COMMIT_TRY_SECONDS = 10.0
+
+
+def git_here(*args: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+    """git, run in the workspace root, with what it printed kept."""
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def commits_itself() -> bool:
@@ -1183,23 +1257,68 @@ def commits_itself() -> bool:
         return False
 
 
-def commit_file(rel: str, message: str) -> bool:
+def commit_file(rel: str, message: str | Callable[[], str]) -> bool:
     """Commit one file, and only that file, where the workspace commits every
     change by itself, so it reaches GitHub like the rest of the work. Anything
-    else waiting to be committed is left exactly as it is."""
+    else waiting to be committed, staged or not, is left exactly as it is.
+
+    Nothing is committed when the file is the same as in the last commit.
+    While git is busy it tries again for COMMIT_TRY_SECONDS, then logs why and
+    leaves the file. `message` may be a function, asked again on every try, so
+    the words match what the file holds when it goes in. Returns whether a
+    commit was made."""
     if not commits_itself():
         return False
+    why = ""
     with _commit_lock:
-        for _ in range(3):
-            subprocess.run(["git", "add", "--", rel], cwd=ROOT, capture_output=True, timeout=30)
-            done = subprocess.run(["git", "commit", "-q", "-m", message, "--", rel], cwd=ROOT,
-                                  capture_output=True, text=True, timeout=60)
-            if done.returncode == 0:
-                return True
-            if "nothing to commit" in done.stdout + done.stderr or "no changes" in done.stdout + done.stderr:
-                return False
-            time.sleep(0.5)          # another git command held the index; try again
+        deadline = time.monotonic() + COMMIT_TRY_SECONDS
+        while True:
+            try:
+                state = git_here("status", "--porcelain", "--untracked-files=all", "--", rel, timeout=30)
+                if state.returncode == 0 and not state.stdout.strip():
+                    return False                          # the same as the last commit
+                if state.returncode != 0:
+                    why = state.stderr or state.stdout
+                elif git_here("symbolic-ref", "-q", "HEAD", timeout=10).returncode != 0:
+                    why = "the checkout is not on a branch, as during a rebase"
+                else:
+                    if state.stdout.startswith("??"):     # new to git: --only needs it known
+                        git_here("add", "--", rel, timeout=30)
+                    text = message() if callable(message) else message
+                    done = git_here("commit", "--only", "-q", "-m", text, "--", rel)
+                    if done.returncode == 0:
+                        return True
+                    why = done.stderr or done.stdout
+            except (OSError, subprocess.SubprocessError) as exc:
+                why = str(exc)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)                               # most often another git command holds the index
+    sys.stderr.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} could not commit {rel} in "
+                     f"{COMMIT_TRY_SECONDS:g} s of trying, so it is left as it is: "
+                     f"{' '.join(why.split()) or 'git gave no reason'}\n")
     return False
+
+
+def committed_json(rel: str) -> Any:
+    """`rel` as the last commit holds it; {} when it holds none, or none that parses."""
+    shown = git_here("show", f"HEAD:./{rel}", timeout=30)
+    try:
+        return json.loads(shown.stdout) if shown.returncode == 0 else {}
+    except ValueError:
+        return {}
+
+
+def commit_categories() -> bool:
+    """Commit _categories.json on its own after the index page wrote it, with a
+    message worked out from the last commit's copy and the file as it is now."""
+    def message() -> str:
+        try:
+            now = json.loads(CATEGORIES_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            now = {}
+        return category_changes_message(committed_json(CATEGORIES_FILE.name), now)
+    return commit_file(CATEGORIES_FILE.name, message)
 
 
 # ---------------------------------------------------------------- index data
@@ -1814,9 +1933,9 @@ class Handler(BaseHTTPRequestHandler):
         status, body = change_categories(data.get("action"), data)
         self._json(body, status)
         if status == 200 and body.get("ok"):
-            # Committed like the rest of the work, so the change reaches GitHub.
-            message = category_commit_message(data.get("action"), data, body) + "\n\nMade on the index page."
-            threading.Thread(target=commit_file, args=(CATEGORIES_FILE.name, message), daemon=True).start()
+            # Committed like the rest of the work, so the change reaches GitHub
+            # within seconds; in the background, so the page never waits on git.
+            threading.Thread(target=commit_categories, daemon=True).start()
 
     # -- /api/ask ---------------------------------------------------------
 

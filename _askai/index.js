@@ -159,7 +159,7 @@
   }
   /* How far along the task is, from its _task.json. */
   function statusChip(t) {
-    return t.status ? '<span class="status" data-status="' + esc(t.status) + '">' + esc(t.status_label) + '</span>' : '';
+    return t.status ? '<span class="task-status" data-status="' + esc(t.status) + '">' + esc(t.status_label) + '</span>' : '';
   }
   function lines(steps, cls) {
     return steps.map(function (s) {
@@ -857,7 +857,7 @@
       '<input class="hd" data-field="new-holds" maxlength="240" aria-label="What goes in the new category" placeholder="What goes here">' +
       '<span class="n"></span><button type="submit" class="go">Add</button>' +
       '<p class="why" hidden>Pick ' + either + ' for it first.</p></form>' +
-      '<footer class="mgr-foot"><span>Every change is saved as you make it, to ' + esc(DATA.file) + '.</span>' +
+      '<footer class="mgr-foot"><span>' + esc(DATA.savedNote || 'Every change is saved as you make it, to ' + DATA.file + '.') + '</span>' +
       '<button type="button" class="done">Done</button></footer></div>';
     manageEl.innerHTML = html;
     $('.mgr-add .nm', manageEl).value = pending.name;

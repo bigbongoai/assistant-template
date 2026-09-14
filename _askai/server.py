@@ -32,9 +32,11 @@ import mimetypes
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -1145,6 +1147,61 @@ def change_categories(action: Any, data: dict[str, Any]) -> tuple[int, dict[str,
         return 200, {"ok": True, **normalize_categories(raw)}
 
 
+def category_commit_message(action: Any, data: dict[str, Any], doc: dict[str, Any]) -> str:
+    """One line saying what a change to the categories did, for its commit."""
+    names = {c["id"]: c["name"] for c in doc.get("categories") or []}
+    if action == "move":
+        target = data.get("category")
+        where = f"to {names.get(target, target)}" if target else "back to not sorted"
+        return f"Categories: {data.get('task')} moved {where}{' as a guess' if data.get('guess') is True else ''}"
+    if action == "add":
+        return f"Categories: new category {clean_text(data.get('name'), CATEGORY_NAME_MAX)}"
+    if action == "update":
+        fields = [f for f in ("name", "side", "color", "holds") if f in data]
+        return f"Categories: {names.get(data.get('id'), data.get('id'))} changed ({', '.join(fields)})"
+    if action == "delete":
+        return f"Categories: {data.get('id')} deleted"
+    return "Categories changed"
+
+
+# ------------------------------------------------------- committing a change
+
+# Serialises this proxy's own commits, so two quick changes cannot trip over
+# each other's hold on git's index.
+_commit_lock = threading.Lock()
+
+
+def commits_itself() -> bool:
+    """Whether this workspace commits and pushes every change by itself: its
+    post-commit hook runs bin/sync. Only then does a change made on a page get
+    committed for the person; anywhere else it is left for them to commit."""
+    try:
+        where = subprocess.run(["git", "rev-parse", "--git-path", "hooks/post-commit"], cwd=ROOT,
+                               capture_output=True, text=True, timeout=10).stdout.strip()
+        return bool(where) and "bin/sync" in (ROOT / where).read_text(encoding="utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def commit_file(rel: str, message: str) -> bool:
+    """Commit one file, and only that file, where the workspace commits every
+    change by itself, so it reaches GitHub like the rest of the work. Anything
+    else waiting to be committed is left exactly as it is."""
+    if not commits_itself():
+        return False
+    with _commit_lock:
+        for _ in range(3):
+            subprocess.run(["git", "add", "--", rel], cwd=ROOT, capture_output=True, timeout=30)
+            done = subprocess.run(["git", "commit", "-q", "-m", message, "--", rel], cwd=ROOT,
+                                  capture_output=True, text=True, timeout=60)
+            if done.returncode == 0:
+                return True
+            if "nothing to commit" in done.stdout + done.stderr or "no changes" in done.stdout + done.stderr:
+                return False
+            time.sleep(0.5)          # another git command held the index; try again
+    return False
+
+
 # ---------------------------------------------------------------- index data
 
 
@@ -1459,7 +1516,7 @@ padding:40px 20px;color:#1a1a18;background:#f7f7f5}}</style></head><body>
 def status_chip(task: dict[str, Any]) -> str:
     if not task.get("status"):
         return ""
-    return (f'<span class="status" data-status="{html_escape(task["status"], quote=True)}">'
+    return (f'<span class="task-status" data-status="{html_escape(task["status"], quote=True)}">'
             f'{html_escape(task["status_label"])}</span>')
 
 
@@ -1529,7 +1586,7 @@ def render_placeholder(task: dict[str, Any]) -> bytes:
     number = task["number"]
     title = f"Task {number} · {task['name']}" if number is not None else task["name"]
     tag = f'<span class="tk-num">Task {number}</span>' if number is not None else ""
-    chip = status_chip(task) or '<span class="status" data-status="none">No status yet</span>'
+    chip = status_chip(task) or '<span class="task-status" data-status="none">No status yet</span>'
     stands = where_it_stands(task["folder"])
     notes = note_html(stands) if stands else (
         '<p class="tk-none">Its <code>CLAUDE.md</code> has no "Where this stands" section yet.</p>')
@@ -1573,8 +1630,12 @@ def mirror_bundle() -> dict[str, Any]:
     pages = discover_pages()
     tasks = all_tasks()
     task_of = {(t["area"], t["task_dir"]): t for t in tasks}
+    cats = load_categories()
     return {
         "index": index_data(),
+        # The categories as this workspace's file holds them, so a change made
+        # on briefings.page is drawn on top of exactly what is here.
+        "categories": {key: cats[key] for key in ("sides", "categories", "tasks", "error")},
         # A task with one page opens that page; every other task has a page of
         # its own, and one with no page yet has the page drawn from its status.
         "tasks": {t["rel"]: (render_task(t, readonly=True) if t["pages"]
@@ -1752,6 +1813,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         status, body = change_categories(data.get("action"), data)
         self._json(body, status)
+        if status == 200 and body.get("ok"):
+            # Committed like the rest of the work, so the change reaches GitHub.
+            message = category_commit_message(data.get("action"), data, body) + "\n\nMade on the index page."
+            threading.Thread(target=commit_file, args=(CATEGORIES_FILE.name, message), daemon=True).start()
 
     # -- /api/ask ---------------------------------------------------------
 

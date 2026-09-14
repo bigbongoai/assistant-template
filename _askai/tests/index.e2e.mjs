@@ -280,11 +280,15 @@ async function pick(p, text) {
     check('a task with no page yet is on the index', ids.includes('tasks/04.delta') && ids.includes('tasks/05.epsilon'), ids);
     check('its line says it has no page yet',
       await p.$eval('.row[data-id="tasks/04.delta"] .latest', e => e.textContent) === 'No page yet');
-    check('its status from _task.json is on its line, in plain words', await p.$eval('.row[data-id="tasks/04.delta"] .status',
+    check('its status from _task.json is on its line, in plain words', await p.$eval('.row[data-id="tasks/04.delta"] .task-status',
       e => e.dataset.status === 'in-progress' && e.textContent === 'In progress'));
     check('a task with pages shows its status too',
-      await p.$eval('.row[data-id="tasks/01.alpha"] .status', e => e.textContent) === 'Done');
-    check('a task with no status shows none', (await p.$$('.row[data-id="tasks/05.epsilon"] .status')).length === 0);
+      await p.$eval('.row[data-id="tasks/01.alpha"] .task-status', e => e.textContent) === 'Done');
+    check('a task with no status shows none', (await p.$$('.row[data-id="tasks/05.epsilon"] .task-status')).length === 0);
+    check('the line under the search box keeps its own look', await p.$eval('.search .status', e => {
+      const st = getComputedStyle(e);
+      return /mono/i.test(st.fontFamily) && st.backgroundColor === 'rgba(0, 0, 0, 0)';
+    }));
     await p.fill('#q', 'in progress');
     await settle(p);
     check('searching for a status finds its tasks', JSON.stringify(await p.$$eval('.row:not([hidden])',
@@ -302,7 +306,7 @@ async function pick(p, text) {
     check('that page has the top bar', (await p.$$('#askai-crumb')).length === 1);
     writeFileSync(join(root, 'tasks/04.delta/_task.json'), '{"status": "waiting"}');
     await p.reload();
-    check('it shows a new status as soon as the file says so', await p.$eval('.status', e => e.textContent) === 'Waiting on you');
+    check('it shows a new status as soon as the file says so', await p.$eval('.task-status', e => e.textContent) === 'Waiting on you');
     const bare = await (await fetch(url + 'task/tasks/05.epsilon/')).text();
     check('a task with no status or notes says so', bare.includes('No status yet') && bare.includes('no "Where this stands" section'));
 
@@ -313,7 +317,7 @@ async function pick(p, text) {
     check('once it has a page, its line opens that page', await p.$eval('.row[data-id="tasks/04.delta"] .tl',
       a => a.getAttribute('href')) === '/page/tasks/04.delta/04-01.first/index.html');
     await p.goto(url + 'task/tasks/01.alpha/');
-    check('a task\'s own page shows its status', await p.$eval('.tk-h1 .status', e => e.textContent) === 'Done');
+    check('a task\'s own page shows its status', await p.$eval('.tk-h1 .task-status', e => e.textContent) === 'Done');
   } finally {
     proc.kill();
     rmSync(root, { recursive: true, force: true });

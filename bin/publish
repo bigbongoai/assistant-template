@@ -519,9 +519,15 @@ def _try_lock(handle):
         return False
 
 
-def load_bundle():
-    """The index, each task's page and every page's top bar, drawn read-only by
-    this workspace's own proxy code, so the copy looks exactly like home."""
+_server = None
+
+
+def load_server():
+    """This workspace's own proxy code, loaded once. It draws the copy's index,
+    and makes category changes exactly as the index page does at home."""
+    global _server
+    if _server is not None:
+        return _server
     source = ROOT / "_askai" / "server.py"
     if not source.is_file():
         die("this workspace has no _askai/server.py, so there is no index to copy.")
@@ -531,6 +537,14 @@ def load_bundle():
         spec.loader.exec_module(module)
     except Exception as exc:          # a broken proxy is not a reason to crash
         die(f"could not load _askai/server.py ({exc}).")
+    _server = module
+    return module
+
+
+def load_bundle():
+    """The index, each task's page and every page's top bar, drawn read-only by
+    this workspace's own proxy code, so the copy looks exactly like home."""
+    module = load_server()
     if not hasattr(module, "mirror_bundle"):
         die("this workspace's _askai/server.py is too old to draw the copy. Update the "
             "workspace (git pull upstream main) and run this again.")
@@ -538,6 +552,44 @@ def load_bundle():
         return module.mirror_bundle()
     except Exception as exc:
         die(f"drawing the index failed ({exc}).")
+
+
+def online_edits(token):
+    """Category changes made on briefings.page that this computer has not made
+    yet, oldest first. None from a briefings.page that cannot take them."""
+    status, body = api("/api/publish/workspace/edits", token=token)
+    return (body.get("edits") or []) if status == 200 else []
+
+
+def make_online_edits(run, edits):
+    """Make here, in order, the category changes made on briefings.page, with
+    the index page's own code, and commit them like any other change to the
+    work. Returns the last one's id, which the next copy reports back so that
+    briefings.page can drop them."""
+    module = load_server()
+    if not hasattr(module, "change_categories"):
+        die("this workspace's _askai/server.py cannot change categories. Update the "
+            "workspace and run this again.")
+    made = []
+    for edit in edits:
+        data = edit.get("data") if isinstance(edit.get("data"), dict) else {}
+        status, body = module.change_categories(edit.get("action"), data)
+        if status == 200 and body.get("ok"):
+            made.append(module.category_commit_message(edit.get("action"), data, body)
+                        if hasattr(module, "category_commit_message") else "Categories changed")
+        else:
+            run.say(f"A category change from briefings.page was not made here: {body.get('error')}")
+    if made:
+        if len(made) == 1:
+            message = f"{made[0]}\n\nMade on briefings.page."
+        else:
+            message = (f"Categories: {len(made)} changes made on briefings.page\n\n"
+                       + "\n".join(f"- {line.removeprefix('Categories: ')}" for line in made))
+        committed = hasattr(module, "commit_file") and module.commit_file(
+            module.CATEGORIES_FILE.name, message)
+        run.say(f"Made {len(made)} category change{'' if len(made) == 1 else 's'} from "
+                f"briefings.page{' and committed them' if committed else ' in _categories.json'}.")
+    return max(int(e.get("id") or 0) for e in edits)
 
 
 def copy_files(bundle):
@@ -601,12 +653,17 @@ def sync_once(run, token):
     except (OSError, ValueError):
         state = {}
 
+    # Category changes made on briefings.page are made here first, so this
+    # copy already carries them, and it says which ones it has made.
+    edits = online_edits(token)
+    applied = make_online_edits(run, edits) if edits else None
+
     bundle = load_bundle()
     paths, too_big = copy_files(bundle)
     manifest, seen = hash_files(paths, state.get("hashes") or {})
     mark = hashlib.sha256(json.dumps([manifest, bundle, host()], sort_keys=True)
                           .encode("utf-8")).hexdigest()
-    if state.get("fingerprint") == mark:
+    if state.get("fingerprint") == mark and applied is None:
         run.say(f"Nothing has changed since the last copy: {state.get('url', '')}")
         return
 
@@ -638,6 +695,7 @@ def sync_once(run, token):
     status, body = api("/api/publish/workspace/commit", {
         "files": manifest, "bundle": bundle, "head": head,
         "source": socket.gethostname(),
+        **({"edits_applied": applied} if applied is not None else {}),
     }, token=token, timeout=300)
     if status != 200:
         run.fail(refused(status, body, "the new copy was not saved"))
@@ -687,6 +745,17 @@ def cmd_sync(quiet=False):
     finally:
         _run = None
         lock.close()
+
+
+def cmd_pull(quiet=False):
+    """Run every 30 seconds by bin/sync: if briefings.page holds category
+    changes this computer has not made yet, make them and send the copy. Does
+    nothing at all unless the copy is on here."""
+    if not hooks_are_on():
+        return
+    token = saved_token()
+    if token and online_edits(token):
+        cmd_sync(quiet=quiet)
 
 
 def _is_shell(first_line):
@@ -774,6 +843,8 @@ USAGE = """publish - put a deliverable online with its Ask AI drawer working
   ./bin/publish mirror off    stop sending it
   ./bin/publish mirror        where the copy stands
   ./bin/publish sync          send the copy now, once
+  ./bin/publish pull          make category changes made on briefings.page here
+                              (bin/sync runs it every 30 seconds)
 
 The first run opens a browser to set up an account. Nothing to copy or paste.
 Published pages are public to anyone with the link - never publish client
@@ -797,6 +868,8 @@ def main(argv):
         cmd_rm(rest[0])
     elif command == "sync":
         cmd_sync(quiet="--quiet" in rest)
+    elif command == "pull":
+        cmd_pull(quiet="--quiet" in rest)
     elif command == "mirror":
         cmd_mirror(rest)
     else:

@@ -178,15 +178,16 @@ font-size:13px;padding:3px 8px;border-radius:6px;text-decoration:none;color:var(
 .pub{color:var(--cat-green)}
 .pub:not(:last-child){margin-right:8px}
 .tl .pub{font-family:var(--mono);font-size:10px;font-weight:400;flex:none}
-/* How far along a task is, from its _task.json: a pill beside its name. */
-.status{--st:var(--muted);font-family:var(--sans);font-size:10.5px;font-weight:600;line-height:1;
+/* How far along a task is, from its _task.json: a pill beside its name. Its
+   own class, because .status is already the line under the search box. */
+.task-status{--st:var(--muted);font-family:var(--sans);font-size:10.5px;font-weight:600;line-height:1;
 padding:3px 7px;border-radius:999px;white-space:nowrap;flex:none;align-self:center;color:var(--st);
 border:1px solid transparent;background:color-mix(in srgb,var(--st) 13%,transparent)}
-.status[data-status="not-started"]{--st:var(--subtle);background:none;border-color:var(--border-strong)}
-.status[data-status="in-progress"]{--st:var(--cat-blue)}
-.status[data-status="waiting"]{--st:var(--cat-amber)}
-.status[data-status="stopped"]{--st:var(--cat-slate)}
-.status[data-status="done"]{--st:var(--cat-green)}
+.task-status[data-status="not-started"]{--st:var(--subtle);background:none;border-color:var(--border-strong)}
+.task-status[data-status="in-progress"]{--st:var(--cat-blue)}
+.task-status[data-status="waiting"]{--st:var(--cat-amber)}
+.task-status[data-status="stopped"]{--st:var(--cat-slate)}
+.task-status[data-status="done"]{--st:var(--cat-green)}
 .latest.none{font-style:italic}
 .readonly .cat{cursor:default}
 .readonly .cat:hover{background:none}
